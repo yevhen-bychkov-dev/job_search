@@ -40,7 +40,12 @@ export function ImportForm() {
                 setFileError("CSV files must be 750 KB or smaller.");
                 return;
               }
-              setCsv(await file.text());
+              try {
+                setCsv(await file.text());
+              } catch {
+                setCsv("");
+                setFileError("The CSV file could not be read. Choose another file.");
+              }
             }}
           />
           {filename ? <p className="field-help">Selected: {filename}</p> : null}
@@ -82,7 +87,7 @@ export function ImportForm() {
             <SubmitButton pendingLabel="Importing jobs…" className="button button-primary" >Import {validRows} valid jobs</SubmitButton>
           </form>
           {state.message ? (
-            <div className={`alert alert-${state.status}`} role="status">
+            <div className={`alert alert-${state.status}`} role={state.status === "error" ? "alert" : "status"}>
               <strong>{state.message}</strong>
               {state.summary ? <span> Imported: {state.summary.imported}. Duplicates: {state.summary.duplicates}. Invalid: {state.summary.invalid}.</span> : null}
             </div>

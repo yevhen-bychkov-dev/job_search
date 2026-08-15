@@ -5,13 +5,19 @@ import { redirect } from "next/navigation";
 
 import { requireIdentity } from "@/features/auth/session";
 import { getAppStore } from "@/lib/data/server-store";
+import { ResourceNotFoundError } from "@/lib/data/contracts";
+import { reportUnexpectedError } from "@/lib/server-errors";
+import { isUuid } from "@/lib/validation";
 
 export async function deleteKnowledgeFileAction(id: string): Promise<void> {
   const identity = await requireIdentity();
-  if (!/^[0-9a-f-]{36}$/i.test(id)) redirect("/knowledge-base?error=invalid-id");
+  if (!isUuid(id)) redirect("/knowledge-base?error=invalid-id");
   try {
     await getAppStore().deleteKnowledgeFile(identity.userId, id);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ResourceNotFoundError)) {
+      reportUnexpectedError("knowledge.delete", error);
+    }
     redirect("/knowledge-base?error=delete");
   }
   revalidatePath("/knowledge-base");

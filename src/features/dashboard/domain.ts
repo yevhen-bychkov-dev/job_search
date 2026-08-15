@@ -1,4 +1,5 @@
 import { JOB_STATUSES, type Job, type JobStatus, type JobStatusHistory } from "../jobs/types.ts";
+import { monthInTimeZone } from "../jobs/domain.ts";
 
 export type DashboardSummary = {
   metrics: {
@@ -14,11 +15,10 @@ export type DashboardSummary = {
   rejectionsOverTime: Array<{ month: string; count: number }>;
 };
 
-function monthKey(value: string): string {
-  return /^\d{4}-\d{2}/.test(value) ? value.slice(0, 7) : "";
-}
-
-function countByMonth(values: string[]): Array<{ month: string; count: number }> {
+function countByMonth(
+  values: string[],
+  monthKey: (value: string) => string = (value) => /^\d{4}-\d{2}/.test(value) ? value.slice(0, 7) : "",
+): Array<{ month: string; count: number }> {
   const counts = new Map<string, number>();
   for (const value of values) {
     const month = monthKey(value);
@@ -49,6 +49,7 @@ export function buildDashboardSummary(
     applicationsOverTime: countByMonth(jobs.map((job) => job.appliedOn).filter(Boolean)),
     rejectionsOverTime: countByMonth(
       history.filter((event) => event.toStatus === "rejected").map((event) => event.changedAt),
+      monthInTimeZone,
     ),
   };
 }

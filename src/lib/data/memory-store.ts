@@ -8,6 +8,7 @@ import type { KnowledgeFile } from "@/features/knowledge/types";
 
 import {
   type AppStore,
+  ConcurrentModificationError,
   DuplicateJobError,
   ResourceNotFoundError,
   type StoredKnowledgeDownload,
@@ -101,7 +102,9 @@ export class MemoryAppStore implements AppStore {
 
   async createJob(userId: string, input: JobInput): Promise<Job> {
     const duplicateKey = jobDuplicateKey(input);
-    if (await this.hasDuplicate(userId, duplicateKey)) throw new DuplicateJobError();
+    if (state().jobs.some((job) => job.userId === userId && job.duplicateKey === duplicateKey)) {
+      throw new DuplicateJobError();
+    }
     const stored = createJobRecord(userId, input);
     state().jobs.push(stored);
     state().history.push({
@@ -115,9 +118,47 @@ export class MemoryAppStore implements AppStore {
     return publicJob(stored);
   }
 
-  async updateJob(userId: string, id: string, input: JobInput): Promise<Job> {
+  async importJobs(
+    userId: string,
+    inputs: JobInput[],
+  ): Promise<{ imported: number; duplicates: number }> {
+    const existingKeys = new Set(
+      state().jobs.filter((job) => job.userId === userId).map((job) => job.duplicateKey),
+    );
+    const staged: Array<Job & { userId: string; duplicateKey: string }> = [];
+    let duplicates = 0;
+    for (const input of inputs) {
+      const duplicateKey = jobDuplicateKey(input);
+      if (existingKeys.has(duplicateKey)) {
+        duplicates += 1;
+        continue;
+      }
+      existingKeys.add(duplicateKey);
+      staged.push(createJobRecord(userId, input));
+    }
+
+    const history = staged.map((job) => ({
+      id: crypto.randomUUID(),
+      jobId: job.id,
+      userId,
+      fromStatus: null,
+      toStatus: job.status,
+      changedAt: job.createdAt,
+    }));
+    state().jobs.push(...staged);
+    state().history.push(...history);
+    return { imported: staged.length, duplicates };
+  }
+
+  async updateJob(
+    userId: string,
+    id: string,
+    input: JobInput,
+    expectedUpdatedAt: string,
+  ): Promise<Job> {
     const current = state().jobs.find((job) => job.userId === userId && job.id === id);
     if (!current) throw new ResourceNotFoundError("Job");
+    if (current.updatedAt !== expectedUpdatedAt) throw new ConcurrentModificationError();
     const duplicateKey = jobDuplicateKey(input);
     if (
       state().jobs.some(
@@ -127,7 +168,10 @@ export class MemoryAppStore implements AppStore {
       throw new DuplicateJobError();
     }
     const priorStatus = current.status;
-    Object.assign(current, input, { duplicateKey, updatedAt: new Date().toISOString() });
+    const nextUpdatedAt = new Date(
+      Math.max(Date.now(), new Date(current.updatedAt).getTime() + 1),
+    ).toISOString();
+    Object.assign(current, input, { duplicateKey, updatedAt: nextUpdatedAt });
     if (priorStatus !== current.status) {
       state().history.push({
         id: crypto.randomUUID(),
@@ -153,7 +197,9 @@ export class MemoryAppStore implements AppStore {
       const fromStatus = current.status;
       current.status = status;
       if (!current.appliedOn && status === "applied") current.appliedOn = appliedOn;
-      current.updatedAt = new Date().toISOString();
+      current.updatedAt = new Date(
+        Math.max(Date.now(), new Date(current.updatedAt).getTime() + 1),
+      ).toISOString();
       state().history.push({
         id: crypto.randomUUID(),
         jobId: id,
@@ -162,6 +208,11 @@ export class MemoryAppStore implements AppStore {
         toStatus: status,
         changedAt: current.updatedAt,
       });
+    } else if (status === "applied" && !current.appliedOn) {
+      current.appliedOn = appliedOn;
+      current.updatedAt = new Date(
+        Math.max(Date.now(), new Date(current.updatedAt).getTime() + 1),
+      ).toISOString();
     }
     return publicJob(current);
   }
@@ -173,9 +224,10 @@ export class MemoryAppStore implements AppStore {
     state().history = state().history.filter((event) => event.jobId !== id);
   }
 
-  async listStatusHistory(userId: string): Promise<JobStatusHistory[]> {
+  async listStatusHistory(userId: string, jobId?: string): Promise<JobStatusHistory[]> {
     return state()
       .history.filter((event) => event.userId === userId)
+      .filter((event) => !jobId || event.jobId === jobId)
       .map((event) => ({
         id: event.id,
         jobId: event.jobId,
@@ -183,12 +235,6 @@ export class MemoryAppStore implements AppStore {
         toStatus: event.toStatus,
         changedAt: event.changedAt,
       }));
-  }
-
-  async hasDuplicate(userId: string, duplicateKey: string): Promise<boolean> {
-    return state().jobs.some(
-      (job) => job.userId === userId && job.duplicateKey === duplicateKey,
-    );
   }
 
   async getFilters(userId: string): Promise<FilterSettings> {

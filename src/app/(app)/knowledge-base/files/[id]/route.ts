@@ -1,11 +1,13 @@
 import { requireIdentity } from "@/features/auth/session";
 import { ResourceNotFoundError } from "@/lib/data/contracts";
 import { getAppStore } from "@/lib/data/server-store";
+import { reportUnexpectedError } from "@/lib/server-errors";
+import { isUuid } from "@/lib/validation";
 
 export async function GET(_request: Request, context: RouteContext<"/knowledge-base/files/[id]">) {
   const identity = await requireIdentity();
   const { id } = await context.params;
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
+  if (!isUuid(id)) return new Response("Not found", { status: 404 });
   try {
     const download = await getAppStore().downloadKnowledgeFile(identity.userId, id);
     if (download.kind === "redirect") return Response.redirect(download.url, 302);
@@ -17,6 +19,9 @@ export async function GET(_request: Request, context: RouteContext<"/knowledge-b
       },
     });
   } catch (error) {
+    if (!(error instanceof ResourceNotFoundError)) {
+      reportUnexpectedError("knowledge.download", error);
+    }
     return new Response(error instanceof ResourceNotFoundError ? "Not found" : "Unable to open file", { status: error instanceof ResourceNotFoundError ? 404 : 500 });
   }
 }

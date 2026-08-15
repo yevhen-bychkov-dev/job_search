@@ -22,6 +22,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("authentication, protected routes, navigation, and logout", async ({ page }) => {
+  const loginResponse = await page.request.get("/login");
+  expect(loginResponse.headers()["x-content-type-options"]).toBe("nosniff");
+  expect(loginResponse.headers()["x-frame-options"]).toBe("DENY");
   await page.goto("/jobs");
   await expect(page).toHaveURL(/\/login\?next=%2Fjobs$/);
 
@@ -63,10 +66,15 @@ test("job creation, list, detail, edit, board status, dashboard, and delete", as
   await page.getByLabel("Location").fill("Warsaw");
   await page.getByLabel("Work mode").selectOption("hybrid");
   await page.getByLabel("Employment type").selectOption("full_time");
-  await page.getByLabel("Date applied").fill("2026-08-15");
+  await page.getByLabel("Date discovered").fill("2026-08-15");
+  await page.getByLabel("Date applied").fill("2026-08-14");
   await page.getByLabel("Technologies").fill("React, TypeScript, Next.js");
   await page.getByLabel("Description").fill("Synthetic role used only by deterministic browser tests.");
   await page.getByLabel("Private notes").fill("Synthetic note; contains no personal data.");
+  await page.getByRole("button", { name: "Create job" }).click();
+  await expect(page.getByText("Applied date cannot be earlier than the discovered date.")).toBeVisible();
+  await expect(page.getByText("Check the highlighted fields.")).toBeFocused();
+  await page.getByLabel("Date applied").fill("2026-08-15");
   await page.getByRole("button", { name: "Create job" }).click();
 
   await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}\?created=1$/);
@@ -75,10 +83,18 @@ test("job creation, list, detail, edit, board status, dashboard, and delete", as
   await expect(page.getByText("Synthetic role used only")).toBeVisible();
 
   await page.getByRole("link", { name: "Edit job" }).click();
+  const stalePage = await page.context().newPage();
+  await stalePage.goto(page.url());
+  await expect(stalePage.getByRole("heading", { name: "Edit Frontend Engineer" })).toBeVisible();
   await page.getByLabel("Job title").fill("Senior Frontend Engineer");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("heading", { name: "Senior Frontend Engineer" })).toBeVisible();
   await expect(page.getByText("Job updated.")).toBeVisible();
+  await stalePage.getByLabel("Job title").fill("Stale Frontend Engineer");
+  await stalePage.getByRole("button", { name: "Save changes" }).click();
+  await expect(stalePage.getByText("This job changed in another tab. Reload the page before saving again.")).toBeVisible();
+  await expect(stalePage.getByText("This job changed in another tab. Reload the page before saving again.")).toBeFocused();
+  await stalePage.close();
 
   await page.getByRole("link", { name: "Board", exact: true }).click();
   await expect(page.getByRole("link", { name: /Senior Frontend Engineer/ })).toBeVisible();
@@ -112,6 +128,12 @@ test("filter editing and CSV import preview, validation, deduplication, and summ
   await page.getByRole("link", { name: "Filters", exact: true }).click();
   await expect(page.getByLabel("Included technologies")).toHaveValue(/React/);
   await page.getByLabel("Preferred job titles").fill("Frontend\nUI Engineer");
+  await page.getByLabel("Excluded technologies").fill("React");
+  await page.getByRole("button", { name: "Save filters" }).click();
+  await expect(page.getByText("React cannot be both included and excluded.")).toBeVisible();
+  await expect(page.getByText("Check the highlighted fields.")).toBeFocused();
+  await expect(page.getByLabel("Preferred job titles")).toHaveValue("Frontend\nUI Engineer");
+  await page.getByLabel("Excluded technologies").fill("PHP");
   await page.getByRole("button", { name: "Save filters" }).click();
   await expect(page.getByText("Filters saved.")).toBeVisible();
   await page.reload();
@@ -138,6 +160,13 @@ test("filter editing and CSV import preview, validation, deduplication, and summ
 test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
   await signIn(page);
   await page.getByRole("link", { name: "Knowledge Base", exact: true }).click();
+  await page.getByLabel("Add a document").setInputFiles({
+    name: "forged.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("This is not a PDF."),
+  });
+  await page.getByRole("button", { name: "Upload file" }).click();
+  await expect(page.getByText("The file contents do not match the selected file type.")).toBeVisible();
   await page.getByLabel("Add a document").setInputFiles({
     name: "synthetic-resume.txt",
     mimeType: "text/plain",

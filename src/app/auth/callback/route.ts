@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { safeAuthDestination } from "@/features/auth/types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { reportUnexpectedError } from "@/lib/server-errors";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -13,7 +14,8 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) return NextResponse.redirect(new URL("/login?error=callback", url.origin));
     return NextResponse.redirect(new URL(destination, url.origin));
-  } catch {
+  } catch (error) {
+    reportUnexpectedError("auth.callback", error);
     return NextResponse.redirect(new URL("/login?error=configuration", url.origin));
   }
 }

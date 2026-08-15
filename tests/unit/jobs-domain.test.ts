@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   dateInTimeZone,
+  formDataToRecord,
   jobDuplicateKey,
   normalizeSourceUrl,
   parseJobInput,
@@ -43,6 +44,14 @@ test("rejects missing identity fields, unsafe URLs, and impossible dates", () =>
   assert.deepEqual(Object.keys(result.errors).sort(), ["company", "discoveredOn", "sourceUrl", "title"]);
 });
 
+test("rejects embedded URL credentials and applied dates before discovery", () => {
+  assert.equal(normalizeSourceUrl("https://user:password@example.test/job"), "");
+  const result = parseJobInput({ ...base, discoveredOn: "2026-08-15", appliedOn: "2026-08-14" });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.errors.appliedOn, /earlier/i);
+});
+
 test("normalizes status aliases without accepting arbitrary values", () => {
   assert.equal(parseJobStatus("Interviewing"), "interview");
   assert.equal(parseJobStatus("unknown"), null);
@@ -64,4 +73,13 @@ test("fallback duplicate key uses normalized company, title, and location", () =
 test("Warsaw date is correct around UTC midnight and DST transitions", () => {
   assert.equal(dateInTimeZone(new Date("2026-03-28T23:30:00Z")), "2026-03-29");
   assert.equal(dateInTimeZone(new Date("2026-10-24T22:30:00Z")), "2026-10-25");
+});
+
+test("form conversion allowlists fields and bounds values returned after errors", () => {
+  const formData = new FormData();
+  formData.set("title", "x".repeat(500));
+  formData.set("unexpected", "do not reflect this value");
+  const values = formDataToRecord(formData);
+  assert.equal(values.title.length, 200);
+  assert.equal(values.unexpected, undefined);
 });

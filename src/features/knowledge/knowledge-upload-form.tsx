@@ -47,7 +47,7 @@ export function KnowledgeUploadForm() {
         <p className="field-help">PDF, DOCX, TXT, Markdown, or CSV. Maximum 4 MB.</p>
       </div>
       <button className="button button-primary" type="submit" disabled={pending}>{pending ? "Uploading…" : "Upload file"}</button>
-      {feedback ? <p className={`alert alert-${feedback.status}`} role="status">{feedback.message}</p> : null}
+      {feedback ? <p className={`alert alert-${feedback.status}`} role={feedback.status === "error" ? "alert" : "status"}>{feedback.message}</p> : null}
     </form>
   );
 }

@@ -34,3 +34,12 @@ test("requires title and company mappings and rejects unclosed quotes", () => {
   assert.match(previewCsv("Foo,Bar\na,b").fatalError, /title and company/i);
   assert.match(previewCsv('Title,Company\n"Broken,Synthetic Labs').fatalError, /unclosed/i);
 });
+
+test("preserves spreadsheet-formula-like cells as inert text", () => {
+  const preview = previewCsv(
+    'Title,Company,Notes\nFrontend Engineer,Synthetic Labs,"=HYPERLINK(""https://example.test"",""click"")"',
+    "2026-08-15",
+  );
+  assert.equal(preview.fatalError, "");
+  assert.equal(preview.rows[0].job?.notes, '=HYPERLINK("https://example.test","click")');
+});

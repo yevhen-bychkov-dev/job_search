@@ -18,7 +18,7 @@ export function StatusForm({ id, status, compact = false, returnTo = `/jobs/${id
         {JOB_STATUSES.map((option) => <option value={option} key={option}>{JOB_STATUS_LABELS[option]}</option>)}
       </select>
       <SubmitButton className="button button-secondary button-small" pendingLabel="Updating…">Update</SubmitButton>
-      {state.message ? <span className={`inline-message ${state.status}`} role="status">{state.message}</span> : null}
+      {state.message ? <span className={`inline-message ${state.status}`} role={state.status === "error" ? "alert" : "status"}>{state.message}</span> : null}
     </form>
   );
 }

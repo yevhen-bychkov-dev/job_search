@@ -104,6 +104,34 @@ export function dateInTimeZone(
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+export function monthInTimeZone(
+  value: string,
+  timeZone = "Europe/Warsaw",
+): string {
+  const instant = new Date(value);
+  return Number.isNaN(instant.getTime()) ? "" : dateInTimeZone(instant, timeZone).slice(0, 7);
+}
+
+export function formatDateInTimeZone(
+  value: string,
+  timeZone = "Europe/Warsaw",
+): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone, dateStyle: "medium" }).format(
+    new Date(value),
+  );
+}
+
+export function formatDateTimeInTimeZone(
+  value: string,
+  timeZone = "Europe/Warsaw",
+): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
 export function parseJobStatus(value: unknown): JobStatus | null {
   if (typeof value !== "string") return null;
   return STATUS_ALIASES[value.trim().toLocaleLowerCase("en")] ?? null;
@@ -124,6 +152,7 @@ export function normalizeSourceUrl(value: string): string {
   try {
     const url = new URL(value.trim());
     if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    if (url.username || url.password) return "";
     url.hash = "";
     for (const key of [...url.searchParams.keys()]) {
       const lower = key.toLocaleLowerCase("en");
@@ -190,6 +219,8 @@ export function parseJobInput(
   }
   if (appliedOn && !isValidDateOnly(appliedOn)) {
     errors.appliedOn = "Enter a valid applied date in YYYY-MM-DD format.";
+  } else if (appliedOn && isValidDateOnly(discoveredOn) && appliedOn < discoveredOn) {
+    errors.appliedOn = "Applied date cannot be earlier than the discovered date.";
   }
   if (Object.keys(errors).length > 0 || !status || !workMode || !employmentType) {
     return { ok: false, errors };
@@ -216,10 +247,30 @@ export function parseJobInput(
   };
 }
 
-export function formDataToRecord(formData: FormData): Record<string, unknown> {
-  const record: Record<string, unknown> = {};
-  for (const [key, value] of formData.entries()) {
-    if (typeof value === "string") record[key] = value;
+export function formDataToRecord(formData: FormData): Record<string, string> {
+  const limits = {
+    title: 200,
+    company: 200,
+    status: 40,
+    source: 120,
+    sourceUrl: 2048,
+    location: 200,
+    workMode: 40,
+    employmentType: 40,
+    salary: 200,
+    description: 30_000,
+    technologies: 3000,
+    notes: 20_000,
+    discoveredOn: 10,
+    appliedOn: 10,
+    updatedAt: 40,
+    id: 36,
+    returnTo: 200,
+  } as const;
+  const record: Record<string, string> = {};
+  for (const [key, limit] of Object.entries(limits)) {
+    const value = formData.get(key);
+    if (typeof value === "string") record[key] = value.slice(0, limit);
   }
   return record;
 }

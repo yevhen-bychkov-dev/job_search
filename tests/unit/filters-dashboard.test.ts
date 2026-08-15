@@ -46,3 +46,17 @@ test("dashboard derives current metrics and historical trends from stored record
   assert.deepEqual(summary.applicationsOverTime, [{ month: "2026-07", count: 1 }, { month: "2026-08", count: 1 }]);
   assert.deepEqual(summary.rejectionsOverTime, [{ month: "2026-08", count: 1 }]);
 });
+
+test("rejection trends use the Warsaw calendar month rather than UTC", () => {
+  const history: JobStatusHistory[] = [
+    {
+      id: "h-boundary",
+      jobId: "1",
+      fromStatus: "interview",
+      toStatus: "rejected",
+      changedAt: "2026-08-31T22:30:00Z",
+    },
+  ];
+  const summary = buildDashboardSummary([], history);
+  assert.deepEqual(summary.rejectionsOverTime, [{ month: "2026-09", count: 1 }]);
+});

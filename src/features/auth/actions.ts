@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { isPlaywrightTestMode } from "@/lib/supabase/environment";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { reportUnexpectedError } from "@/lib/server-errors";
 
 import { TEST_IDENTITY, TEST_SESSION_COOKIE } from "./session";
 import { safeAuthDestination, type AuthActionState } from "./types";
@@ -38,9 +39,10 @@ export async function signInAction(
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { status: "error", message: "Email or password is incorrect." };
     } catch (error) {
+      reportUnexpectedError("auth.sign_in", error);
       return {
         status: "error",
-        message: error instanceof Error ? error.message : "Sign-in is temporarily unavailable.",
+        message: "Sign-in is temporarily unavailable. Please try again.",
       };
     }
   }
@@ -53,7 +55,11 @@ export async function signOutAction(): Promise<void> {
     (await cookies()).delete(TEST_SESSION_COOKIE);
   } else {
     const supabase = await createServerSupabaseClient();
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      reportUnexpectedError("auth.sign_out", error);
+      redirect("/account?error=signout");
+    }
   }
   redirect("/login?signedOut=1");
 }

@@ -53,6 +53,7 @@ export async function proxy(request: NextRequest) {
     if (isProtected(pathname) && !authenticated) return loginRedirect(request);
     if (pathname === "/login" && authenticated) return NextResponse.redirect(new URL("/dashboard", request.url));
   } catch {
+    // Fail closed on verification/configuration errors; Proxy is only an optimistic redirect boundary.
     if (isProtected(pathname)) return loginRedirect(request);
   }
   return response;

@@ -6,6 +6,7 @@ import { requireIdentity } from "@/features/auth/session";
 import { deleteKnowledgeFileAction } from "@/features/knowledge/actions";
 import { KnowledgeUploadForm } from "@/features/knowledge/knowledge-upload-form";
 import { getAppStore } from "@/lib/data/server-store";
+import { formatDateInTimeZone } from "@/features/jobs/domain";
 
 export const metadata: Metadata = { title: "Knowledge Base" };
 
@@ -26,7 +27,7 @@ export default async function KnowledgeBasePage({ searchParams }: PageProps<"/kn
       {query.error ? <p className="alert alert-error" role="alert">The file could not be deleted. Please try again.</p> : null}
       <KnowledgeUploadForm />
       <section className="card stack" aria-labelledby="files-heading"><div className="section-heading"><div><p className="eyebrow">Private storage</p><h2 id="files-heading">Uploaded files</h2></div><span className="count-pill">{files.length}</span></div>
-        {files.length === 0 ? <div className="empty-state compact"><span className="empty-icon">▱</span><h3>No files uploaded</h3><p>Your private documents will appear here.</p></div> : <div className="file-list">{files.map((file) => { const deleteAction = deleteKnowledgeFileAction.bind(null, file.id); return <article className="file-row" key={file.id}><span className="file-icon" aria-hidden="true">DOC</span><div><strong>{file.originalName}</strong><span>{formatBytes(file.sizeBytes)} · {new Date(file.createdAt).toLocaleDateString("en-GB")}</span></div><div className="file-actions"><a className="button button-secondary button-small" href={`/knowledge-base/files/${file.id}`} target="_blank">Open</a><form action={deleteAction}><ConfirmSubmitButton confirmation={`Delete ${file.originalName}?`}>Delete</ConfirmSubmitButton></form></div></article>; })}</div>}
+        {files.length === 0 ? <div className="empty-state compact"><span className="empty-icon">▱</span><h3>No files uploaded</h3><p>Your private documents will appear here.</p></div> : <div className="file-list">{files.map((file) => { const deleteAction = deleteKnowledgeFileAction.bind(null, file.id); return <article className="file-row" key={file.id}><span className="file-icon" aria-hidden="true">DOC</span><div><strong>{file.originalName}</strong><span>{formatBytes(file.sizeBytes)} · {formatDateInTimeZone(file.createdAt)}</span></div><div className="file-actions"><a className="button button-secondary button-small" href={`/knowledge-base/files/${file.id}`} target="_blank" rel="noreferrer">Open</a><form action={deleteAction}><ConfirmSubmitButton confirmation={`Delete ${file.originalName}?`}>Delete</ConfirmSubmitButton></form></div></article>; })}</div>}
       </section>
     </div>
   );

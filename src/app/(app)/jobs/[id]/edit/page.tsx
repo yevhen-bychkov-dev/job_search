@@ -7,13 +7,14 @@ import { requireIdentity } from "@/features/auth/session";
 import { updateJobAction } from "@/features/jobs/actions";
 import { JobForm } from "@/features/jobs/job-form";
 import { getAppStore } from "@/lib/data/server-store";
+import { isUuid } from "@/lib/validation";
 
 export const metadata: Metadata = { title: "Edit job" };
 
 export default async function EditJobPage({ params }: PageProps<"/jobs/[id]/edit">) {
   const identity = await requireIdentity();
   const { id } = await params;
-  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
+  if (!isUuid(id)) notFound();
   const job = await getAppStore().getJob(identity.userId, id);
   if (!job) notFound();
   const action = updateJobAction.bind(null, id);

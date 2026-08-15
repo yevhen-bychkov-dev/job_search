@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 
 import { requireIdentity } from "@/features/auth/session";
 import { dateInTimeZone } from "@/features/jobs/domain";
-import { DuplicateJobError } from "@/lib/data/contracts";
+import type { JobInput } from "@/features/jobs/types";
 import { getAppStore } from "@/lib/data/server-store";
+import { reportUnexpectedError } from "@/lib/server-errors";
 
 import { previewCsv } from "./csv";
 import type { ImportActionState } from "./types";
@@ -21,27 +22,30 @@ export async function importCsvAction(
     return { status: "error", message: preview.fatalError || "No data rows were found." };
   }
 
-  const store = getAppStore();
-  let imported = 0;
   let duplicates = 0;
   let invalid = 0;
+  const jobs: JobInput[] = [];
   for (const row of preview.rows) {
     if (!row.job || Object.keys(row.errors).length > 0) {
       if (row.errors.duplicate) duplicates += 1;
       else invalid += 1;
       continue;
     }
-    try {
-      if (await store.hasDuplicate(identity.userId, row.duplicateKey)) {
-        duplicates += 1;
-        continue;
-      }
-      await store.createJob(identity.userId, row.job);
-      imported += 1;
-    } catch (error) {
-      if (error instanceof DuplicateJobError) duplicates += 1;
-      else invalid += 1;
-    }
+    jobs.push(row.job);
+  }
+
+  let imported = 0;
+  try {
+    const result = await getAppStore().importJobs(identity.userId, jobs);
+    imported = result.imported;
+    duplicates += result.duplicates;
+  } catch (error) {
+    reportUnexpectedError("jobs.csv_import", error);
+    return {
+      status: "error",
+      message: "The import could not be completed. No new jobs were saved.",
+      summary: { imported: 0, duplicates, invalid },
+    };
   }
 
   revalidatePath("/jobs");

@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(40);
+select plan(50);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -29,6 +29,20 @@ select throws_ok(
   '23514',
   null,
   'database constraint rejects an invalid title'
+);
+select throws_ok(
+  $$insert into public.jobs (user_id, title, company, source_url, discovered_on, dedupe_key)
+    values ('11111111-1111-4111-8111-111111111111', 'Unsafe Link', 'Synthetic Labs', 'javascript:alert(1)', '2026-08-01', 'fallback:unsafe-link')$$,
+  '23514',
+  null,
+  'database constraint rejects a non-http source URL'
+);
+select throws_ok(
+  $$update public.jobs set user_id = '22222222-2222-4222-8222-222222222222'
+    where user_id = '11111111-1111-4111-8111-111111111111'$$,
+  '42501',
+  null,
+  'user A cannot reassign an owned job to user B'
 );
 
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
@@ -82,6 +96,25 @@ select lives_ok(
   'user B can create owned file metadata'
 );
 select is((select count(*) from public.knowledge_files), 1::bigint, 'user B can read owned file metadata');
+select is(
+  (with changed as (update public.knowledge_files set original_name = 'changed.txt' returning *) select count(*) from changed),
+  0::bigint,
+  'file metadata cannot be updated directly'
+);
+select throws_ok(
+  $$insert into public.knowledge_files (user_id, object_path, original_name, mime_type, size_bytes)
+    values ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111/wrong.txt', 'wrong.txt', 'text/plain', 10)$$,
+  '23514',
+  null,
+  'file metadata path must begin with its owner UUID'
+);
+select throws_ok(
+  $$insert into public.knowledge_files (user_id, object_path, original_name, mime_type, size_bytes)
+    values ('22222222-2222-4222-8222-222222222222', '22222222-2222-4222-8222-222222222222/unsafe.txt', '../unsafe.txt', 'text/plain', 10)$$,
+  '23514',
+  null,
+  'file metadata rejects unsafe original names'
+);
 
 set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
 select is((select count(*) from public.knowledge_files), 0::bigint, 'user A cannot read user B file metadata');
@@ -101,6 +134,17 @@ select is((with removed as (delete from public.knowledge_files returning *) sele
 reset role;
 select is((select count(*) from storage.buckets where id = 'knowledge-base' and public = false), 1::bigint, 'private knowledge-base bucket exists');
 select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'knowledge_objects_%'), 4::bigint, 'Storage has select, insert, update, and delete ownership policies');
+select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'knowledge_files' and cmd = 'UPDATE'), 0::bigint, 'file metadata has no direct update policy');
+select like(
+  (select qual from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'knowledge_objects_select_own'),
+  '%owner_id%auth.uid%',
+  'Storage select policy verifies object ownership'
+);
+select like(
+  (select with_check from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'knowledge_objects_insert_own'),
+  '%foldername%auth.uid%',
+  'Storage insert policy verifies the authenticated path prefix'
+);
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'job_status_history' and cmd <> 'SELECT'), 0::bigint, 'status history cannot be directly mutated through RLS');
 
 set local role anon;
@@ -115,6 +159,19 @@ select throws_ok(
   '42501',
   null,
   'anonymous users cannot create jobs'
+);
+select throws_ok(
+  $$insert into public.user_filters (user_id) values ('11111111-1111-4111-8111-111111111111')$$,
+  '42501',
+  null,
+  'anonymous users cannot create filter settings'
+);
+select throws_ok(
+  $$insert into public.knowledge_files (user_id, object_path, original_name, mime_type, size_bytes)
+    values ('11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111/anon.txt', 'anon.txt', 'text/plain', 10)$$,
+  '42501',
+  null,
+  'anonymous users cannot create file metadata'
 );
 
 set local role authenticated;

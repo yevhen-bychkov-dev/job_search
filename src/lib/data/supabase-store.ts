@@ -6,9 +6,12 @@ import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import type { KnowledgeFile } from "@/features/knowledge/types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { reportUnexpectedError } from "@/lib/server-errors";
 
 import {
   type AppStore,
+  ConcurrentModificationError,
+  DataConsistencyError,
   DuplicateJobError,
   ResourceNotFoundError,
   type StoredKnowledgeDownload,
@@ -113,7 +116,29 @@ export class SupabaseAppStore implements AppStore {
     return toJob(data);
   }
 
-  async updateJob(userId: string, id: string, input: JobInput): Promise<Job> {
+  async importJobs(
+    userId: string,
+    inputs: JobInput[],
+  ): Promise<{ imported: number; duplicates: number }> {
+    if (inputs.length === 0) return { imported: 0, duplicates: 0 };
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from("jobs")
+      .upsert(inputs.map((input) => jobInsert(userId, input)), {
+        onConflict: "user_id,dedupe_key",
+        ignoreDuplicates: true,
+      })
+      .select("id");
+    if (error) throw new Error(`Unable to import jobs: ${error.message}`);
+    return { imported: data.length, duplicates: inputs.length - data.length };
+  }
+
+  async updateJob(
+    userId: string,
+    id: string,
+    input: JobInput,
+    expectedUpdatedAt: string,
+  ): Promise<Job> {
     const supabase = await createServerSupabaseClient();
     const update = {
       title: input.title,
@@ -137,12 +162,16 @@ export class SupabaseAppStore implements AppStore {
       .update(update)
       .eq("user_id", userId)
       .eq("id", id)
+      .eq("updated_at", expectedUpdatedAt)
       .select(
         "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
       )
       .maybeSingle();
     if (error) throwDataError("Unable to update job", error);
-    if (!data) throw new ResourceNotFoundError("Job");
+    if (!data) {
+      if (await this.getJob(userId, id)) throw new ConcurrentModificationError();
+      throw new ResourceNotFoundError("Job");
+    }
     return toJob(data);
   }
 
@@ -152,13 +181,39 @@ export class SupabaseAppStore implements AppStore {
     status: JobStatus,
     appliedOn: string,
   ): Promise<Job> {
-    const current = await this.getJob(userId, id);
-    if (!current) throw new ResourceNotFoundError("Job");
-    return this.updateJob(userId, id, {
-      ...current,
-      status,
-      appliedOn: !current.appliedOn && status === "applied" ? appliedOn : current.appliedOn,
-    });
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from("jobs")
+      .update({ status })
+      .eq("user_id", userId)
+      .eq("id", id)
+      .select(
+        "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+      )
+      .maybeSingle();
+    if (error) throw new Error(`Unable to update job status: ${error.message}`);
+    if (!data) throw new ResourceNotFoundError("Job");
+    if (status === "applied" && !data.applied_on) {
+      const appliedDateUpdate = await supabase
+        .from("jobs")
+        .update({ applied_on: appliedOn })
+        .eq("user_id", userId)
+        .eq("id", id)
+        .eq("status", "applied")
+        .is("applied_on", null)
+        .select(
+          "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        )
+        .maybeSingle();
+      if (appliedDateUpdate.error) {
+        throw new Error(`Unable to set the applied date: ${appliedDateUpdate.error.message}`);
+      }
+      if (appliedDateUpdate.data) return toJob(appliedDateUpdate.data);
+      const latest = await this.getJob(userId, id);
+      if (!latest) throw new ResourceNotFoundError("Job");
+      return latest;
+    }
+    return toJob(data);
   }
 
   async deleteJob(userId: string, id: string): Promise<void> {
@@ -173,17 +228,17 @@ export class SupabaseAppStore implements AppStore {
     if (data.length === 0) throw new ResourceNotFoundError("Job");
   }
 
-  async listStatusHistory(userId: string): Promise<JobStatusHistory[]> {
-    const jobs = await this.listJobs(userId);
-    if (jobs.length === 0) return [];
+  async listStatusHistory(userId: string, jobId?: string): Promise<JobStatusHistory[]> {
     const supabase = await createServerSupabaseClient();
+    let jobsQuery = supabase.from("jobs").select("id").eq("user_id", userId);
+    if (jobId) jobsQuery = jobsQuery.eq("id", jobId);
+    const { data: ownedJobs, error: jobsError } = await jobsQuery;
+    if (jobsError) throw new Error(`Unable to scope status history: ${jobsError.message}`);
+    if (ownedJobs.length === 0) return [];
     const { data, error } = await supabase
       .from("job_status_history")
       .select("id,job_id,from_status,to_status,changed_at")
-      .in(
-        "job_id",
-        jobs.map((job) => job.id),
-      )
+      .in("job_id", ownedJobs.map((job) => job.id))
       .order("changed_at", { ascending: true });
     if (error) throw new Error(`Unable to load status history: ${error.message}`);
     return data.map((row) => ({
@@ -193,17 +248,6 @@ export class SupabaseAppStore implements AppStore {
       toStatus: row.to_status,
       changedAt: row.changed_at,
     }));
-  }
-
-  async hasDuplicate(userId: string, duplicateKey: string): Promise<boolean> {
-    const supabase = await createServerSupabaseClient();
-    const { count, error } = await supabase
-      .from("jobs")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("dedupe_key", duplicateKey);
-    if (error) throw new Error(`Unable to check duplicate jobs: ${error.message}`);
-    return (count ?? 0) > 0;
   }
 
   async getFilters(userId: string): Promise<FilterSettings> {
@@ -286,7 +330,13 @@ export class SupabaseAppStore implements AppStore {
       .select("id,original_name,mime_type,size_bytes,created_at")
       .single();
     if (metadata.error) {
-      await supabase.storage.from("knowledge-base").remove([objectPath]);
+      const cleanup = await supabase.storage.from("knowledge-base").remove([objectPath]);
+      if (cleanup.error) {
+        reportUnexpectedError("knowledge.upload.compensation", cleanup.error);
+        throw new DataConsistencyError(
+          "File metadata failed and the uploaded object could not be cleaned up.",
+        );
+      }
       throw new Error(`Unable to record file metadata: ${metadata.error.message}`);
     }
     return {
@@ -317,20 +367,40 @@ export class SupabaseAppStore implements AppStore {
     const supabase = await createServerSupabaseClient();
     const { data, error } = await supabase
       .from("knowledge_files")
-      .select("object_path")
+      .select("object_path,mime_type")
       .eq("user_id", userId)
       .eq("id", id)
       .maybeSingle();
-    if (error) throw new Error(`Unable to load file: ${error.message}`);
+    if (error) throw new Error(`Unable to load file metadata: ${error.message}`);
     if (!data) throw new ResourceNotFoundError("File");
+
+    const backup = await supabase.storage.from("knowledge-base").download(data.object_path);
+    if (backup.error) throw new Error(`Unable to prepare file deletion: ${backup.error.message}`);
+    const backupBytes = new Uint8Array(await backup.data.arrayBuffer());
     const removal = await supabase.storage.from("knowledge-base").remove([data.object_path]);
     if (removal.error) throw new Error(`Unable to delete stored file: ${removal.error.message}`);
+
     const metadata = await supabase
       .from("knowledge_files")
       .delete()
       .eq("user_id", userId)
-      .eq("id", id);
-    if (metadata.error) throw new Error(`Unable to delete file metadata: ${metadata.error.message}`);
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (metadata.error) {
+      const restore = await supabase.storage.from("knowledge-base").upload(
+        data.object_path,
+        backupBytes,
+        { contentType: data.mime_type, upsert: false },
+      );
+      if (restore.error) {
+        reportUnexpectedError("knowledge.delete.compensation", restore.error);
+        throw new DataConsistencyError(
+          "File metadata remained after deletion and the object could not be restored.",
+        );
+      }
+      throw new Error(`Unable to delete file metadata: ${metadata.error.message}`);
+    }
   }
 
   async resetForTests(): Promise<void> {
