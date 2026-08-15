@@ -1,0 +1,42 @@
+import type { FilterSettings } from "@/features/filters/types";
+import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
+import type { KnowledgeFile } from "@/features/knowledge/types";
+
+export class DuplicateJobError extends Error {
+  constructor() {
+    super("This job appears to already exist.");
+    this.name = "DuplicateJobError";
+  }
+}
+
+export class ResourceNotFoundError extends Error {
+  constructor(resource = "Resource") {
+    super(`${resource} was not found.`);
+    this.name = "ResourceNotFoundError";
+  }
+}
+
+export type StoredKnowledgeDownload =
+  | { kind: "redirect"; url: string }
+  | { kind: "content"; bytes: Uint8Array; mimeType: string; filename: string };
+
+export interface AppStore {
+  listJobs(userId: string, query?: JobQuery): Promise<Job[]>;
+  getJob(userId: string, id: string): Promise<Job | null>;
+  createJob(userId: string, input: JobInput): Promise<Job>;
+  updateJob(userId: string, id: string, input: JobInput): Promise<Job>;
+  updateJobStatus(userId: string, id: string, status: JobStatus, appliedOn: string): Promise<Job>;
+  deleteJob(userId: string, id: string): Promise<void>;
+  listStatusHistory(userId: string): Promise<JobStatusHistory[]>;
+  hasDuplicate(userId: string, duplicateKey: string): Promise<boolean>;
+  getFilters(userId: string): Promise<FilterSettings>;
+  saveFilters(userId: string, filters: FilterSettings): Promise<FilterSettings>;
+  listKnowledgeFiles(userId: string): Promise<KnowledgeFile[]>;
+  uploadKnowledgeFile(
+    userId: string,
+    file: { filename: string; mimeType: string; bytes: Uint8Array },
+  ): Promise<KnowledgeFile>;
+  downloadKnowledgeFile(userId: string, id: string): Promise<StoredKnowledgeDownload>;
+  deleteKnowledgeFile(userId: string, id: string): Promise<void>;
+  resetForTests(): Promise<void>;
+}

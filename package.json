@@ -1,0 +1,42 @@
+{
+  "name": "job-search-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "next typegen && tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "node --test \"tests/unit/*.test.ts\"",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "db:reset": "supabase db reset --local",
+    "db:test": "supabase test db --local",
+    "db:types": "supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "next": "16.3.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.1",
+    "supabase": "^2.39.2",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "npm@11.11.0"
+}
