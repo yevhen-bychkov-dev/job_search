@@ -24,7 +24,7 @@ async function getJobRows(userId: string) {
   const { data, error } = await supabase
     .from("jobs")
     .select(
-      "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+      "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
@@ -40,6 +40,8 @@ function toJob(row: JobRow): Job {
     status: row.status,
     source: row.source,
     sourceUrl: row.source_url,
+    externalSource: row.external_source ?? "",
+    externalJobId: row.external_job_id ?? "",
     location: row.location,
     workMode: row.work_mode,
     employmentType: row.employment_type,
@@ -62,6 +64,8 @@ function jobInsert(userId: string, input: JobInput) {
     status: input.status,
     source: input.source,
     source_url: input.sourceUrl,
+    external_source: input.externalSource || null,
+    external_job_id: input.externalJobId || null,
     location: input.location,
     work_mode: input.workMode,
     employment_type: input.employmentType,
@@ -94,7 +98,7 @@ export class SupabaseAppStore implements AppStore {
     const { data, error } = await supabase
       .from("jobs")
       .select(
-        "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
       )
       .eq("user_id", userId)
       .eq("id", id)
@@ -109,7 +113,7 @@ export class SupabaseAppStore implements AppStore {
       .from("jobs")
       .insert(jobInsert(userId, input))
       .select(
-        "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
       )
       .single();
     if (error) throwDataError("Unable to create job", error);
@@ -133,6 +137,42 @@ export class SupabaseAppStore implements AppStore {
     return { imported: data.length, duplicates: inputs.length - data.length };
   }
 
+  async listExternalJobIds(
+    userId: string,
+    source: string,
+  ): Promise<{ saved: string[]; ignored: string[]; savedUrls: string[] }> {
+    const supabase = await createServerSupabaseClient();
+    const [savedResult, ignoredResult] = await Promise.all([
+      supabase
+        .from("jobs")
+        .select("external_source,external_job_id,source_url")
+        .eq("user_id", userId),
+      supabase
+        .from("ignored_external_jobs")
+        .select("external_job_id")
+        .eq("user_id", userId)
+        .eq("source", source),
+    ]);
+    if (savedResult.error) throw new Error(`Unable to load saved external jobs: ${savedResult.error.message}`);
+    if (ignoredResult.error) throw new Error(`Unable to load ignored external jobs: ${ignoredResult.error.message}`);
+    return {
+      saved: savedResult.data.flatMap((row) => row.external_source === source && row.external_job_id ? [row.external_job_id] : []),
+      savedUrls: savedResult.data.flatMap((row) =>
+        (!row.external_source || row.external_source === source) && row.source_url ? [row.source_url] : []
+      ),
+      ignored: ignoredResult.data.map((row) => row.external_job_id),
+    };
+  }
+
+  async ignoreExternalJob(userId: string, source: string, externalJobId: string): Promise<void> {
+    const supabase = await createServerSupabaseClient();
+    const { error } = await supabase.from("ignored_external_jobs").upsert(
+      { user_id: userId, source, external_job_id: externalJobId },
+      { onConflict: "user_id,source,external_job_id", ignoreDuplicates: true },
+    );
+    if (error) throw new Error(`Unable to ignore external job: ${error.message}`);
+  }
+
   async updateJob(
     userId: string,
     id: string,
@@ -140,12 +180,21 @@ export class SupabaseAppStore implements AppStore {
     expectedUpdatedAt: string,
   ): Promise<Job> {
     const supabase = await createServerSupabaseClient();
+    const existing = await this.getJob(userId, id);
+    if (!existing) throw new ResourceNotFoundError("Job");
+    const identityInput: JobInput = {
+      ...input,
+      externalSource: existing.externalSource,
+      externalJobId: existing.externalJobId,
+    };
     const update = {
       title: input.title,
       company: input.company,
       status: input.status,
       source: input.source,
       source_url: input.sourceUrl,
+      external_source: identityInput.externalSource || null,
+      external_job_id: identityInput.externalJobId || null,
       location: input.location,
       work_mode: input.workMode,
       employment_type: input.employmentType,
@@ -155,7 +204,7 @@ export class SupabaseAppStore implements AppStore {
       notes: input.notes,
       discovered_on: input.discoveredOn,
       applied_on: input.appliedOn || null,
-      dedupe_key: jobDuplicateKey(input),
+      dedupe_key: jobDuplicateKey(identityInput),
     };
     const { data, error } = await supabase
       .from("jobs")
@@ -164,7 +213,7 @@ export class SupabaseAppStore implements AppStore {
       .eq("id", id)
       .eq("updated_at", expectedUpdatedAt)
       .select(
-        "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
       )
       .maybeSingle();
     if (error) throwDataError("Unable to update job", error);
@@ -188,7 +237,7 @@ export class SupabaseAppStore implements AppStore {
       .eq("user_id", userId)
       .eq("id", id)
       .select(
-        "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
       )
       .maybeSingle();
     if (error) throw new Error(`Unable to update job status: ${error.message}`);
@@ -202,7 +251,7 @@ export class SupabaseAppStore implements AppStore {
         .eq("status", "applied")
         .is("applied_on", null)
         .select(
-          "id,title,company,status,source,source_url,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+          "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
         )
         .maybeSingle();
       if (appliedDateUpdate.error) {

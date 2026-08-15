@@ -18,6 +18,8 @@ export type Database = {
           description: string;
           discovered_on: string;
           employment_type: Database["public"]["Enums"]["employment_type"];
+          external_job_id: string | null;
+          external_source: string | null;
           id: string;
           location: string;
           notes: string;
@@ -39,6 +41,8 @@ export type Database = {
           description?: string;
           discovered_on: string;
           employment_type?: Database["public"]["Enums"]["employment_type"];
+          external_job_id?: string | null;
+          external_source?: string | null;
           id?: string;
           location?: string;
           notes?: string;
@@ -60,6 +64,8 @@ export type Database = {
           description?: string;
           discovered_on?: string;
           employment_type?: Database["public"]["Enums"]["employment_type"];
+          external_job_id?: string | null;
+          external_source?: string | null;
           id?: string;
           location?: string;
           notes?: string;
@@ -96,6 +102,27 @@ export type Database = {
           id?: string;
           job_id?: string;
           to_status?: Database["public"]["Enums"]["job_status"];
+        };
+        Relationships: [];
+      };
+      ignored_external_jobs: {
+        Row: {
+          external_job_id: string;
+          ignored_at: string;
+          source: string;
+          user_id: string;
+        };
+        Insert: {
+          external_job_id: string;
+          ignored_at?: string;
+          source: string;
+          user_id: string;
+        };
+        Update: {
+          external_job_id?: string;
+          ignored_at?: string;
+          source?: string;
+          user_id?: string;
         };
         Relationships: [];
       };

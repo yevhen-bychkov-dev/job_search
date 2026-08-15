@@ -24,6 +24,7 @@ type MemoryState = {
   history: Array<JobStatusHistory & { userId: string }>;
   filters: Map<string, FilterSettings>;
   files: StoredKnowledgeFile[];
+  ignoredExternalJobs: Array<{ userId: string; source: string; externalJobId: string }>;
 };
 
 declare global {
@@ -31,7 +32,7 @@ declare global {
 }
 
 function initialState(): MemoryState {
-  return { jobs: [], history: [], filters: new Map(), files: [] };
+  return { jobs: [], history: [], filters: new Map(), files: [], ignoredExternalJobs: [] };
 }
 
 function state(): MemoryState {
@@ -44,6 +45,8 @@ function createJobRecord(userId: string, input: JobInput): Job & { userId: strin
   return {
     id: crypto.randomUUID(),
     ...input,
+    externalSource: input.externalSource ?? "",
+    externalJobId: input.externalJobId ?? "",
     userId,
     duplicateKey: jobDuplicateKey(input),
     createdAt: now,
@@ -59,6 +62,8 @@ function publicJob(record: Job & { userId: string; duplicateKey: string }): Job 
     status: record.status,
     source: record.source,
     sourceUrl: record.sourceUrl,
+    externalSource: record.externalSource,
+    externalJobId: record.externalJobId,
     location: record.location,
     workMode: record.workMode,
     employmentType: record.employmentType,
@@ -150,6 +155,31 @@ export class MemoryAppStore implements AppStore {
     return { imported: staged.length, duplicates };
   }
 
+  async listExternalJobIds(
+    userId: string,
+    source: string,
+  ): Promise<{ saved: string[]; ignored: string[]; savedUrls: string[] }> {
+    return {
+      saved: state().jobs
+        .filter((job) => job.userId === userId && job.externalSource === source && job.externalJobId)
+        .flatMap((job) => job.externalJobId ? [job.externalJobId] : []),
+      savedUrls: state().jobs
+        .filter((job) => job.userId === userId && (!job.externalSource || job.externalSource === source))
+        .flatMap((job) => job.sourceUrl ? [job.sourceUrl] : []),
+      ignored: state().ignoredExternalJobs
+        .filter((job) => job.userId === userId && job.source === source)
+        .map((job) => job.externalJobId),
+    };
+  }
+
+  async ignoreExternalJob(userId: string, source: string, externalJobId: string): Promise<void> {
+    if (!state().ignoredExternalJobs.some((job) =>
+      job.userId === userId && job.source === source && job.externalJobId === externalJobId
+    )) {
+      state().ignoredExternalJobs.push({ userId, source, externalJobId });
+    }
+  }
+
   async updateJob(
     userId: string,
     id: string,
@@ -159,7 +189,12 @@ export class MemoryAppStore implements AppStore {
     const current = state().jobs.find((job) => job.userId === userId && job.id === id);
     if (!current) throw new ResourceNotFoundError("Job");
     if (current.updatedAt !== expectedUpdatedAt) throw new ConcurrentModificationError();
-    const duplicateKey = jobDuplicateKey(input);
+    const identityInput: JobInput = {
+      ...input,
+      externalSource: current.externalSource,
+      externalJobId: current.externalJobId,
+    };
+    const duplicateKey = jobDuplicateKey(identityInput);
     if (
       state().jobs.some(
         (job) => job.userId === userId && job.id !== id && job.duplicateKey === duplicateKey,
@@ -171,7 +206,7 @@ export class MemoryAppStore implements AppStore {
     const nextUpdatedAt = new Date(
       Math.max(Date.now(), new Date(current.updatedAt).getTime() + 1),
     ).toISOString();
-    Object.assign(current, input, { duplicateKey, updatedAt: nextUpdatedAt });
+    Object.assign(current, identityInput, { duplicateKey, updatedAt: nextUpdatedAt });
     if (priorStatus !== current.status) {
       state().history.push({
         id: crypto.randomUUID(),

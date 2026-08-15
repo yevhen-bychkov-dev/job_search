@@ -178,8 +178,11 @@ function fingerprintPart(value: string): string {
 }
 
 export function jobDuplicateKey(
-  job: Pick<JobInput, "sourceUrl" | "company" | "title" | "location">,
+  job: Pick<JobInput, "sourceUrl" | "company" | "title" | "location" | "externalSource" | "externalJobId">,
 ): string {
+  if (job.externalSource && job.externalJobId) {
+    return `external:${fingerprintPart(job.externalSource)}:${job.externalJobId.trim()}`;
+  }
   const normalizedUrl = normalizeSourceUrl(job.sourceUrl);
   if (normalizedUrl) return `url:${normalizedUrl}`;
   return `fallback:${fingerprintPart(job.company)}|${fingerprintPart(job.title)}|${fingerprintPart(job.location)}`;
@@ -234,6 +237,8 @@ export function parseJobInput(
       status,
       source: asTrimmedString(input.source, 120),
       sourceUrl: sourceUrl ? normalizeSourceUrl(sourceUrl) : "",
+      externalSource: asTrimmedString(input.externalSource ?? input.external_source, 80),
+      externalJobId: asTrimmedString(input.externalJobId ?? input.external_job_id, 200),
       location: asTrimmedString(input.location, 200),
       workMode,
       employmentType,

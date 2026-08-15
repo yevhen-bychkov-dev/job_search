@@ -42,6 +42,11 @@ export interface AppStore {
     userId: string,
     inputs: JobInput[],
   ): Promise<{ imported: number; duplicates: number }>;
+  listExternalJobIds(
+    userId: string,
+    source: string,
+  ): Promise<{ saved: string[]; ignored: string[]; savedUrls: string[] }>;
+  ignoreExternalJob(userId: string, source: string, externalJobId: string): Promise<void>;
   updateJob(
     userId: string,
     id: string,

@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(50);
+select plan(64);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -147,12 +147,57 @@ select like(
 );
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'job_status_history' and cmd <> 'SELECT'), 0::bigint, 'status history cannot be directly mutated through RLS');
 
+set local role authenticated;
+set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+select lives_ok(
+  $$insert into public.jobs (user_id, title, company, source, source_url, external_source, external_job_id, discovered_on, dedupe_key)
+    values ('11111111-1111-4111-8111-111111111111', 'Discovered Engineer', 'Synthetic Discovery', 'JustJoinIT', 'https://justjoin.it/job-offer/synthetic', 'justjoinit', 'external-1', '2026-08-15', 'external:justjoinit:external-1')$$,
+  'user A can create a discovered job with a stable external identity'
+);
+select throws_ok(
+  $$insert into public.jobs (user_id, title, company, external_source, external_job_id, discovered_on, dedupe_key)
+    values ('11111111-1111-4111-8111-111111111111', 'Duplicate External', 'Synthetic Discovery', 'justjoinit', 'external-1', '2026-08-15', 'fallback:different-key')$$,
+  '23505',
+  null,
+  'database rejects a duplicate source and external job identity'
+);
+select is((select count(*) from public.jobs where external_source = 'justjoinit'), 1::bigint, 'user A sees one discovered job identity');
+select lives_ok(
+  $$insert into public.ignored_external_jobs (user_id, source, external_job_id)
+    values ('11111111-1111-4111-8111-111111111111', 'justjoinit', 'ignored-1')$$,
+  'user A can ignore an external job'
+);
+select is((select count(*) from public.ignored_external_jobs), 1::bigint, 'user A can read the owned ignored identity');
+select is((with changed as (update public.ignored_external_jobs set ignored_at = now() returning *) select count(*) from changed), 1::bigint, 'user A can update the owned ignored identity');
+
+set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
+select is((select count(*) from public.ignored_external_jobs), 0::bigint, 'user B cannot read user A ignored identities');
+select throws_ok(
+  $$insert into public.ignored_external_jobs (user_id, source, external_job_id)
+    values ('11111111-1111-4111-8111-111111111111', 'justjoinit', 'stolen-ignore')$$,
+  '42501',
+  null,
+  'user B cannot create an ignored identity for user A'
+);
+select is((with changed as (update public.ignored_external_jobs set source = 'other' returning *) select count(*) from changed), 0::bigint, 'user B cannot update user A ignored identities');
+select is((with removed as (delete from public.ignored_external_jobs returning *) select count(*) from removed), 0::bigint, 'user B cannot delete user A ignored identities');
+
+set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+select throws_ok(
+  $$update public.ignored_external_jobs set user_id = '22222222-2222-4222-8222-222222222222'$$,
+  '42501',
+  null,
+  'user A cannot reassign an ignored identity to user B'
+);
+select is((with removed as (delete from public.ignored_external_jobs returning *) select count(*) from removed), 1::bigint, 'user A can delete the owned ignored identity');
+
 set local role anon;
 set local request.jwt.claim.sub = '';
 select is((select count(*) from public.jobs), 0::bigint, 'anonymous users cannot read jobs');
 select is((select count(*) from public.job_status_history), 0::bigint, 'anonymous users cannot read status history');
 select is((select count(*) from public.user_filters), 0::bigint, 'anonymous users cannot read filters');
 select is((select count(*) from public.knowledge_files), 0::bigint, 'anonymous users cannot read file metadata');
+select is((select count(*) from public.ignored_external_jobs), 0::bigint, 'anonymous users cannot read ignored identities');
 select throws_ok(
   $$insert into public.jobs (user_id, title, company, discovered_on, dedupe_key)
     values ('11111111-1111-4111-8111-111111111111', 'Anonymous Job', 'Synthetic Labs', '2026-08-01', 'fallback:anonymous')$$,
@@ -167,6 +212,13 @@ select throws_ok(
   'anonymous users cannot create filter settings'
 );
 select throws_ok(
+  $$insert into public.ignored_external_jobs (user_id, source, external_job_id)
+    values ('11111111-1111-4111-8111-111111111111', 'justjoinit', 'anonymous-ignore')$$,
+  '42501',
+  null,
+  'anonymous users cannot create ignored identities'
+);
+select throws_ok(
   $$insert into public.knowledge_files (user_id, object_path, original_name, mime_type, size_bytes)
     values ('11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111/anon.txt', 'anon.txt', 'text/plain', 10)$$,
   '42501',
@@ -176,7 +228,7 @@ select throws_ok(
 
 set local role authenticated;
 set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
-select is((with removed as (delete from public.jobs returning *) select count(*) from removed), 1::bigint, 'user A can delete the owned job');
+select is((with removed as (delete from public.jobs returning *) select count(*) from removed), 2::bigint, 'user A can delete the owned jobs');
 select is((select count(*) from public.jobs), 0::bigint, 'user A has no jobs after owned delete');
 
 select * from finish();

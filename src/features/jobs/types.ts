@@ -59,6 +59,8 @@ export type Job = {
   status: JobStatus;
   source: string;
   sourceUrl: string;
+  externalSource?: string;
+  externalJobId?: string;
   location: string;
   workMode: WorkMode;
   employmentType: EmploymentType;
@@ -72,7 +74,13 @@ export type Job = {
   updatedAt: string;
 };
 
-export type JobInput = Omit<Job, "id" | "createdAt" | "updatedAt">;
+export type JobInput = Omit<
+  Job,
+  "id" | "createdAt" | "updatedAt" | "externalSource" | "externalJobId"
+> & {
+  externalSource?: string;
+  externalJobId?: string;
+};
 
 export type JobStatusHistory = {
   id: string;
