@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const TEST_EMAIL = "demo.user@example.test";
+const SECONDARY_TEST_EMAIL = "other.user@example.test";
 const TEST_PASSWORD = "DemoPass!123";
 
 async function reset(page: Page) {
@@ -8,9 +9,9 @@ async function reset(page: Page) {
   expect(response.ok()).toBeTruthy();
 }
 
-async function signIn(page: Page) {
+async function signIn(page: Page, email = TEST_EMAIL) {
   await page.goto("/login");
-  await page.getByLabel("Email").fill(TEST_EMAIL);
+  await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
@@ -81,6 +82,7 @@ test("job creation, list, detail, edit, board status, dashboard, and delete", as
   await expect(page.getByRole("heading", { name: "Frontend Engineer" })).toBeVisible();
   await expect(page.getByText("Job created.")).toBeVisible();
   await expect(page.getByText("Synthetic role used only")).toBeVisible();
+  await expect(page.getByText(/Add a validated Candidate Profile JSON/)).toBeVisible();
 
   await page.getByRole("link", { name: "Edit job" }).click();
   const stalePage = await page.context().newPage();
@@ -270,6 +272,95 @@ test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
   await page.getByRole("button", { name: "Delete" }).click();
   await expect(page.getByText("File deleted.")).toBeVisible();
   await expect(page.getByText("No files uploaded")).toBeVisible();
+});
+
+test("generate immutable CV versions from the verified Candidate Profile", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Knowledge Base", exact: true }).click();
+  await page.getByLabel("Document type").selectOption("candidate_profile");
+  const candidateProfile = {
+    personal: {
+      name: "Synthetic Candidate",
+      title: "Frontend Engineer",
+      location: "Warsaw, Poland",
+      email: "synthetic.candidate@example.test",
+      phone: "+48 000 000 000",
+      links: { Portfolio: "https://example.test/portfolio" },
+    },
+    summary: "Frontend engineer building accessible synthetic applications.",
+    skills: ["TypeScript", "React", "Accessibility"],
+    experience: [{
+      id: "synthetic-studio-frontend",
+      company: "Synthetic Studio",
+      role: "Frontend Engineer",
+      startDate: "2023-01",
+      endDate: null,
+      technologies: ["TypeScript", "React"],
+      achievements: [{
+        id: "synthetic-accessibility",
+        text: "Built accessible synthetic components for deterministic tests.",
+        skills: ["Accessibility", "React"],
+        categories: ["frontend"],
+      }],
+    }],
+    education: [],
+  };
+  await page.getByLabel("Add a document").setInputFiles({
+    name: "synthetic-candidate-profile.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(candidateProfile)),
+  });
+  await page.getByRole("button", { name: "Upload file" }).click();
+  await expect(page.getByText("File uploaded.")).toBeVisible();
+  await expect(page.getByText(/Candidate profile · Current/)).toBeVisible();
+
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await page.getByRole("link", { name: "Add job" }).first().click();
+  await page.getByLabel("Job title").fill("Accessible Frontend Engineer");
+  await page.getByLabel("Company").fill("Synthetic Hiring Co");
+  await page.getByLabel("Technologies").fill("React, TypeScript");
+  await page.getByLabel("Description").fill("Build accessible React interfaces with TypeScript.");
+  await page.getByRole("button", { name: "Create job" }).click();
+
+  await expect(page.getByRole("heading", { name: "CVs" })).toBeVisible();
+  const ownedJobUrl = new URL(page.url()).pathname;
+  await expect(page.getByText("No CVs generated for this job yet.")).toBeVisible();
+  await page.getByRole("button", { name: "Generate CV" }).click();
+  await expect(page.getByRole("button", { name: "Generating CV…" })).toBeDisabled();
+  await expect(page.getByText("CV #1 generated.")).toBeVisible();
+  for (let version = 2; version <= 5; version += 1) {
+    await page.getByRole("button", { name: "Generate CV" }).click();
+    await expect(page.getByText(`CV #${version} generated.`)).toBeVisible();
+  }
+  await expect(page.locator(".cv-list strong")).toHaveText(["CV #5", "CV #4", "CV #3", "CV #2", "CV #1"]);
+  await expect(page.getByRole("link", { name: "Preview" })).toHaveCount(5);
+  await expect(page.getByRole("link", { name: "Download" })).toHaveCount(5);
+
+  const previewHrefs = await page.getByRole("link", { name: "Preview" }).evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  const downloadHrefs = await page.getByRole("link", { name: "Download" }).evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  for (let index = 0; index < 5; index += 1) {
+    const previewHref = previewHrefs[index];
+    const downloadHref = downloadHrefs[index];
+    if (!previewHref || !downloadHref) throw new Error(`Generated CV #${5 - index} links were not rendered.`);
+    const preview = await page.request.get(previewHref);
+    expect(preview.ok()).toBeTruthy();
+    expect(preview.headers()["content-type"]).toContain("application/pdf");
+    expect(preview.headers()["content-disposition"]).toContain("inline");
+    const download = await page.request.get(downloadHref);
+    expect(download.ok()).toBeTruthy();
+    expect(download.headers()["content-disposition"]).toContain(`attachment; filename*=UTF-8''cv-v${5 - index}.pdf`);
+  }
+
+  await page.context().clearCookies();
+  await signIn(page, SECONDARY_TEST_EMAIL);
+  await page.goto(ownedJobUrl);
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Accessible Frontend Engineer" })).toHaveCount(0);
+  for (const href of [...previewHrefs, ...downloadHrefs]) {
+    if (!href) throw new Error("Generated CV link was not rendered.");
+    const foreignCv = await page.request.get(href);
+    expect(foreignCv.status()).toBe(404);
+  }
 });
 
 test("major screens render cleanly at desktop and narrow widths", async ({ page }, testInfo) => {

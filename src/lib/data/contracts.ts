@@ -1,6 +1,8 @@
 import type { FilterSettings } from "@/features/filters/types";
+import type { GeneratedCv, GeneratedCvContent } from "@/features/cvs/types";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
-import type { KnowledgeFile } from "@/features/knowledge/types";
+import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
+import type { KnowledgeDocumentKind, KnowledgeFile } from "@/features/knowledge/types";
 
 export class DuplicateJobError extends Error {
   constructor() {
@@ -34,6 +36,8 @@ export type StoredKnowledgeDownload =
   | { kind: "redirect"; url: string }
   | { kind: "content"; bytes: Uint8Array; mimeType: string; filename: string };
 
+export type StoredCvDownload = StoredKnowledgeDownload;
+
 export interface AppStore {
   listJobs(userId: string, query?: JobQuery): Promise<Job[]>;
   getJob(userId: string, id: string): Promise<Job | null>;
@@ -61,9 +65,22 @@ export interface AppStore {
   listKnowledgeFiles(userId: string): Promise<KnowledgeFile[]>;
   uploadKnowledgeFile(
     userId: string,
-    file: { filename: string; mimeType: string; bytes: Uint8Array },
+    file: { filename: string; mimeType: string; documentKind: KnowledgeDocumentKind; bytes: Uint8Array },
   ): Promise<KnowledgeFile>;
   downloadKnowledgeFile(userId: string, id: string): Promise<StoredKnowledgeDownload>;
   deleteKnowledgeFile(userId: string, id: string): Promise<void>;
+  getCandidateProfile(userId: string): Promise<CandidateProfile | null>;
+  listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]>;
+  createGeneratedCv(
+    userId: string,
+    jobId: string,
+    input: { bytes: Uint8Array; content: GeneratedCvContent; aiProvider: string; aiModel: string },
+  ): Promise<GeneratedCv>;
+  downloadGeneratedCv(
+    userId: string,
+    jobId: string,
+    id: string,
+    download: boolean,
+  ): Promise<StoredCvDownload>;
   resetForTests(): Promise<void>;
 }

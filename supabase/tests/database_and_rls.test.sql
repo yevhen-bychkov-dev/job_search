@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(64);
+select plan(83);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -14,8 +14,8 @@ set local role authenticated;
 set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
 
 select lives_ok(
-  $$insert into public.jobs (user_id, title, company, status, discovered_on, dedupe_key)
-    values ('11111111-1111-4111-8111-111111111111', 'Frontend Engineer', 'Synthetic Labs', 'saved', '2026-08-01', 'fallback:synthetic labs|frontend engineer|')$$,
+  $$insert into public.jobs (id, user_id, title, company, status, discovered_on, dedupe_key)
+    values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111', 'Frontend Engineer', 'Synthetic Labs', 'saved', '2026-08-01', 'fallback:synthetic labs|frontend engineer|')$$,
   'user A can create an owned job'
 );
 select is((select count(*) from public.jobs), 1::bigint, 'user A can read the owned job');
@@ -64,11 +64,84 @@ select is((select count(*) from public.jobs where title = 'Senior Frontend Engin
 
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 select lives_ok(
-  $$insert into public.jobs (user_id, title, company, discovered_on, dedupe_key)
-    values ('22222222-2222-4222-8222-222222222222', 'Backend Engineer', 'Synthetic Works', '2026-08-02', 'fallback:synthetic works|backend engineer|')$$,
+  $$insert into public.jobs (id, user_id, title, company, discovered_on, dedupe_key)
+    values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '22222222-2222-4222-8222-222222222222', 'Backend Engineer', 'Synthetic Works', '2026-08-02', 'fallback:synthetic works|backend engineer|')$$,
   'user B can create an owned job'
 );
+select lives_ok(
+  $$insert into public.generated_cvs (id, user_id, job_id, version, file_path, content_json, ai_provider, ai_model)
+    values (
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      '22222222-2222-4222-8222-222222222222',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      1,
+      '22222222-2222-4222-8222-222222222222/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/cccccccc-cccc-4ccc-8ccc-cccccccccccc.pdf',
+      '{"headline": null}'::jsonb,
+      'gemini',
+      'gemini-test'
+    )$$,
+  'user B can create an immutable CV version for an owned job'
+);
+select is((select count(*) from public.generated_cvs), 1::bigint, 'user B can read the owned CV version');
+select is(
+  (with changed as (update public.generated_cvs set ai_model = 'changed' returning *) select count(*) from changed),
+  0::bigint,
+  'generated CV versions cannot be updated directly'
+);
+select throws_ok(
+  $$insert into public.generated_cvs (user_id, job_id, version, file_path, content_json, ai_provider, ai_model)
+    values (
+      '22222222-2222-4222-8222-222222222222',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      1,
+      '22222222-2222-4222-8222-222222222222/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/dddddddd-dddd-4ddd-8ddd-dddddddddddd.pdf',
+      '{}'::jsonb,
+      'gemini',
+      'gemini-test'
+    )$$,
+  '23505',
+  null,
+  'database rejects duplicate per-job CV versions'
+);
+select throws_ok(
+  $$insert into public.generated_cvs (user_id, job_id, version, file_path, content_json, ai_provider, ai_model)
+    values (
+      '22222222-2222-4222-8222-222222222222',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      2,
+      '11111111-1111-4111-8111-111111111111/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/dddddddd-dddd-4ddd-8ddd-dddddddddddd.pdf',
+      '{}'::jsonb,
+      'gemini',
+      'gemini-test'
+    )$$,
+  '23514',
+  null,
+  'generated CV file paths must match their owner and job'
+);
+
+set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+select is((select count(*) from public.generated_cvs), 0::bigint, 'user A cannot read user B CV versions');
+select throws_ok(
+  $$insert into public.generated_cvs (user_id, job_id, version, file_path, content_json, ai_provider, ai_model)
+    values (
+      '22222222-2222-4222-8222-222222222222',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      2,
+      '22222222-2222-4222-8222-222222222222/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/dddddddd-dddd-4ddd-8ddd-dddddddddddd.pdf',
+      '{}'::jsonb,
+      'gemini',
+      'gemini-test'
+    )$$,
+  '42501',
+  null,
+  'user A cannot create a CV version for user B job'
+);
+select is((with changed as (update public.generated_cvs set ai_model = 'stolen' returning *) select count(*) from changed), 0::bigint, 'user A cannot update user B CV versions');
+select is((with removed as (delete from public.generated_cvs returning *) select count(*) from removed), 0::bigint, 'user A cannot delete user B CV versions');
+
+set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 select is((with removed as (delete from public.jobs where user_id = '22222222-2222-4222-8222-222222222222' returning *) select count(*) from removed), 1::bigint, 'user B can delete an owned job');
+select is((select count(*) from public.generated_cvs), 0::bigint, 'deleting an owned job cascades its CV metadata');
 
 select lives_ok(
   $$insert into public.user_filters (user_id) values ('22222222-2222-4222-8222-222222222222')$$,
@@ -115,6 +188,20 @@ select throws_ok(
   null,
   'file metadata rejects unsafe original names'
 );
+select throws_ok(
+  $$insert into public.knowledge_files (user_id, object_path, original_name, mime_type, document_kind, size_bytes)
+    values ('22222222-2222-4222-8222-222222222222', '22222222-2222-4222-8222-222222222222/profile.txt', 'profile.txt', 'text/plain', 'candidate_profile', 10)$$,
+  '23514',
+  null,
+  'candidate profile knowledge files must use JSON'
+);
+select throws_ok(
+  $$insert into public.knowledge_files (user_id, object_path, original_name, mime_type, document_kind, size_bytes)
+    values ('22222222-2222-4222-8222-222222222222', '22222222-2222-4222-8222-222222222222/other.json', 'other.json', 'application/json', 'unsupported', 10)$$,
+  '22P02',
+  null,
+  'knowledge files reject unsupported document kinds'
+);
 
 set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
 select is((select count(*) from public.knowledge_files), 0::bigint, 'user A cannot read user B file metadata');
@@ -133,6 +220,7 @@ select is((with removed as (delete from public.knowledge_files returning *) sele
 
 reset role;
 select is((select count(*) from storage.buckets where id = 'knowledge-base' and public = false), 1::bigint, 'private knowledge-base bucket exists');
+select is((select count(*) from storage.buckets where id = 'generated-cvs' and public = false), 1::bigint, 'private generated-cvs bucket exists');
 select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'knowledge_objects_%'), 4::bigint, 'Storage has select, insert, update, and delete ownership policies');
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'knowledge_files' and cmd = 'UPDATE'), 0::bigint, 'file metadata has no direct update policy');
 select like(
@@ -146,6 +234,18 @@ select like(
   'Storage insert policy verifies the authenticated path prefix'
 );
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'job_status_history' and cmd <> 'SELECT'), 0::bigint, 'status history cannot be directly mutated through RLS');
+select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'generated_cv_objects_%'), 3::bigint, 'generated CV Storage has select, insert, and compensation delete policies');
+select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'generated_cvs' and cmd = 'UPDATE'), 0::bigint, 'generated CV metadata has no update policy');
+select like(
+  (select qual from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'generated_cv_objects_select_own'),
+  '%owner_id%auth.uid%',
+  'generated CV Storage select policy verifies object ownership'
+);
+select like(
+  (select with_check from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'generated_cv_objects_insert_own'),
+  '%foldername%auth.uid%',
+  'generated CV Storage insert policy verifies the authenticated path prefix'
+);
 
 set local role authenticated;
 set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
@@ -198,6 +298,7 @@ select is((select count(*) from public.job_status_history), 0::bigint, 'anonymou
 select is((select count(*) from public.user_filters), 0::bigint, 'anonymous users cannot read filters');
 select is((select count(*) from public.knowledge_files), 0::bigint, 'anonymous users cannot read file metadata');
 select is((select count(*) from public.ignored_external_jobs), 0::bigint, 'anonymous users cannot read ignored identities');
+select is((select count(*) from public.generated_cvs), 0::bigint, 'anonymous users cannot read generated CVs');
 select throws_ok(
   $$insert into public.jobs (user_id, title, company, discovered_on, dedupe_key)
     values ('11111111-1111-4111-8111-111111111111', 'Anonymous Job', 'Synthetic Labs', '2026-08-01', 'fallback:anonymous')$$,
@@ -224,6 +325,21 @@ select throws_ok(
   '42501',
   null,
   'anonymous users cannot create file metadata'
+);
+select throws_ok(
+  $$insert into public.generated_cvs (user_id, job_id, version, file_path, content_json, ai_provider, ai_model)
+    values (
+      '11111111-1111-4111-8111-111111111111',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      1,
+      '11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.pdf',
+      '{}'::jsonb,
+      'gemini',
+      'gemini-test'
+    )$$,
+  '42501',
+  null,
+  'anonymous users cannot create generated CV metadata'
 );
 
 set local role authenticated;

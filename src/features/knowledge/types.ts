@@ -2,9 +2,13 @@ export type KnowledgeFile = {
   id: string;
   originalName: string;
   mimeType: string;
+  documentKind: KnowledgeDocumentKind;
   sizeBytes: number;
   createdAt: string;
 };
+
+export const KNOWLEDGE_DOCUMENT_KINDS = ["reference", "candidate_profile"] as const;
+export type KnowledgeDocumentKind = (typeof KNOWLEDGE_DOCUMENT_KINDS)[number];
 
 export const KNOWLEDGE_MIME_TYPES = [
   "application/pdf",
@@ -12,6 +16,7 @@ export const KNOWLEDGE_MIME_TYPES = [
   "text/plain",
   "text/markdown",
   "text/csv",
+  "application/json",
 ] as const;
 
 export const MAX_KNOWLEDGE_FILE_BYTES = 4 * 1024 * 1024;
@@ -22,6 +27,7 @@ const MIME_BY_EXTENSION = {
   ".txt": "text/plain",
   ".md": "text/markdown",
   ".csv": "text/csv",
+  ".json": "application/json",
 } as const;
 
 export function sanitizeFilename(value: string): string {
@@ -46,7 +52,7 @@ export function validateKnowledgeFileMetadata(file: File): string {
   if (file.size <= 0) return "The selected file is empty.";
   if (file.size > MAX_KNOWLEDGE_FILE_BYTES) return "Files must be 4 MB or smaller.";
   if (!KNOWLEDGE_MIME_TYPES.includes(file.type as (typeof KNOWLEDGE_MIME_TYPES)[number])) {
-    return "Upload a PDF, DOCX, TXT, Markdown, or CSV file.";
+    return "Upload a PDF, DOCX, TXT, Markdown, CSV, or JSON file.";
   }
   const extension = filenameExtension(file.name);
   if (!extension || MIME_BY_EXTENSION[extension] !== file.type) {
@@ -91,7 +97,7 @@ export function validateKnowledgeFileContent(
     ? isPdf(bytes)
     : mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ? isDocx(bytes)
-      : ["text/plain", "text/markdown", "text/csv"].includes(mimeType)
+      : ["text/plain", "text/markdown", "text/csv", "application/json"].includes(mimeType)
         ? isUtf8Text(bytes)
         : false;
   return valid ? "" : "The file contents do not match the selected file type.";

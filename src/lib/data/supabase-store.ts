@@ -2,9 +2,13 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
+import { nextCvVersion, parseGeneratedCvContent } from "@/features/cvs/domain";
+import type { GeneratedCv } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
+import { parseCandidateProfileBytes, type CandidateProfile } from "@/features/knowledge/candidate-profile";
 import type { KnowledgeFile } from "@/features/knowledge/types";
+import type { Json } from "@/lib/supabase/database.types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { reportUnexpectedError } from "@/lib/server-errors";
 
@@ -82,6 +86,28 @@ function jobInsert(userId: string, input: JobInput) {
 function throwDataError(prefix: string, error: { code?: string; message: string }): never {
   if (error.code === "23505") throw new DuplicateJobError();
   throw new Error(`${prefix}: ${error.message}`);
+}
+
+function toGeneratedCv(row: {
+  id: string;
+  job_id: string;
+  version: number;
+  content_json: Json;
+  ai_provider: string;
+  ai_model: string;
+  created_at: string;
+}): GeneratedCv {
+  const content = parseGeneratedCvContent(row.content_json);
+  if (!content.ok) throw new DataConsistencyError(content.message);
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    version: row.version,
+    content: content.data,
+    aiProvider: row.ai_provider,
+    aiModel: row.ai_model,
+    createdAt: row.created_at,
+  };
 }
 
 export class SupabaseAppStore implements AppStore {
@@ -267,6 +293,12 @@ export class SupabaseAppStore implements AppStore {
 
   async deleteJob(userId: string, id: string): Promise<void> {
     const supabase = await createServerSupabaseClient();
+    const cvFiles = await supabase
+      .from("generated_cvs")
+      .select("file_path")
+      .eq("user_id", userId)
+      .eq("job_id", id);
+    if (cvFiles.error) throw new Error(`Unable to prepare CV cleanup: ${cvFiles.error.message}`);
     const { data, error } = await supabase
       .from("jobs")
       .delete()
@@ -275,6 +307,10 @@ export class SupabaseAppStore implements AppStore {
       .select("id");
     if (error) throw new Error(`Unable to delete job: ${error.message}`);
     if (data.length === 0) throw new ResourceNotFoundError("Job");
+    if (cvFiles.data.length) {
+      const cleanup = await supabase.storage.from("generated-cvs").remove(cvFiles.data.map((cv) => cv.file_path));
+      if (cleanup.error) reportUnexpectedError("cvs.job-delete.cleanup", cleanup.error);
+    }
   }
 
   async listStatusHistory(userId: string, jobId?: string): Promise<JobStatusHistory[]> {
@@ -343,7 +379,7 @@ export class SupabaseAppStore implements AppStore {
     const supabase = await createServerSupabaseClient();
     const { data, error } = await supabase
       .from("knowledge_files")
-      .select("id,original_name,mime_type,size_bytes,created_at")
+      .select("id,original_name,mime_type,document_kind,size_bytes,created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
     if (error) throw new Error(`Unable to load files: ${error.message}`);
@@ -351,6 +387,7 @@ export class SupabaseAppStore implements AppStore {
       id: row.id,
       originalName: row.original_name,
       mimeType: row.mime_type,
+      documentKind: row.document_kind,
       sizeBytes: row.size_bytes,
       createdAt: row.created_at,
     }));
@@ -358,7 +395,7 @@ export class SupabaseAppStore implements AppStore {
 
   async uploadKnowledgeFile(
     userId: string,
-    file: { filename: string; mimeType: string; bytes: Uint8Array },
+    file: { filename: string; mimeType: string; documentKind: KnowledgeFile["documentKind"]; bytes: Uint8Array },
   ): Promise<KnowledgeFile> {
     const supabase = await createServerSupabaseClient();
     const objectPath = `${userId}/${crypto.randomUUID()}-${file.filename}`;
@@ -374,9 +411,10 @@ export class SupabaseAppStore implements AppStore {
         object_path: objectPath,
         original_name: file.filename,
         mime_type: file.mimeType,
+        document_kind: file.documentKind,
         size_bytes: file.bytes.byteLength,
       })
-      .select("id,original_name,mime_type,size_bytes,created_at")
+      .select("id,original_name,mime_type,document_kind,size_bytes,created_at")
       .single();
     if (metadata.error) {
       const cleanup = await supabase.storage.from("knowledge-base").remove([objectPath]);
@@ -392,6 +430,7 @@ export class SupabaseAppStore implements AppStore {
       id: metadata.data.id,
       originalName: metadata.data.original_name,
       mimeType: metadata.data.mime_type,
+      documentKind: metadata.data.document_kind,
       sizeBytes: metadata.data.size_bytes,
       createdAt: metadata.data.created_at,
     };
@@ -450,6 +489,123 @@ export class SupabaseAppStore implements AppStore {
       }
       throw new Error(`Unable to delete file metadata: ${metadata.error.message}`);
     }
+  }
+
+  async getCandidateProfile(userId: string): Promise<CandidateProfile | null> {
+    const supabase = await createServerSupabaseClient();
+    const metadata = await supabase
+      .from("knowledge_files")
+      .select("object_path")
+      .eq("user_id", userId)
+      .eq("document_kind", "candidate_profile")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (metadata.error) throw new Error(`Unable to load candidate profile metadata: ${metadata.error.message}`);
+    if (!metadata.data) return null;
+    const download = await supabase.storage.from("knowledge-base").download(metadata.data.object_path);
+    if (download.error) throw new Error(`Unable to load candidate profile: ${download.error.message}`);
+    const parsed = parseCandidateProfileBytes(new Uint8Array(await download.data.arrayBuffer()));
+    if (!parsed.ok) throw new DataConsistencyError(`Stored candidate profile is invalid: ${parsed.message}`);
+    return parsed.data;
+  }
+
+  async listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]> {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from("generated_cvs")
+      .select("id,job_id,version,content_json,ai_provider,ai_model,created_at")
+      .eq("user_id", userId)
+      .eq("job_id", jobId)
+      .order("version", { ascending: false });
+    if (error) throw new Error(`Unable to load generated CVs: ${error.message}`);
+    return data.map(toGeneratedCv);
+  }
+
+  async createGeneratedCv(
+    userId: string,
+    jobId: string,
+    input: { bytes: Uint8Array; content: GeneratedCv["content"]; aiProvider: string; aiModel: string },
+  ): Promise<GeneratedCv> {
+    if (!(await this.getJob(userId, jobId))) throw new ResourceNotFoundError("Job");
+    const supabase = await createServerSupabaseClient();
+    const id = crypto.randomUUID();
+    const objectPath = `${userId}/${jobId}/${id}.pdf`;
+    const upload = await supabase.storage.from("generated-cvs").upload(objectPath, input.bytes, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (upload.error) throw new Error(`Unable to upload generated CV: ${upload.error.message}`);
+
+    const cleanupUpload = async (reason: string): Promise<never> => {
+      const cleanup = await supabase.storage.from("generated-cvs").remove([objectPath]);
+      if (cleanup.error) {
+        reportUnexpectedError("cvs.create.compensation", cleanup.error);
+        throw new DataConsistencyError(`${reason} The uploaded PDF could not be cleaned up.`);
+      }
+      throw new Error(reason);
+    };
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const existing = await supabase
+        .from("generated_cvs")
+        .select("version")
+        .eq("user_id", userId)
+        .eq("job_id", jobId)
+        .order("version", { ascending: false })
+        .limit(1);
+      if (existing.error) return cleanupUpload(`Unable to calculate the next CV version: ${existing.error.message}`);
+      const version = nextCvVersion(existing.data.map((row) => row.version));
+      const created = await supabase
+        .from("generated_cvs")
+        .insert({
+          id,
+          user_id: userId,
+          job_id: jobId,
+          version,
+          file_path: objectPath,
+          content_json: input.content as unknown as Json,
+          ai_provider: input.aiProvider,
+          ai_model: input.aiModel,
+        })
+        .select("id,job_id,version,content_json,ai_provider,ai_model,created_at")
+        .single();
+      if (!created.error) return toGeneratedCv(created.data);
+      if (created.error.code !== "23505") return cleanupUpload(`Unable to record generated CV: ${created.error.message}`);
+      const committed = await supabase
+        .from("generated_cvs")
+        .select("id,job_id,version,content_json,ai_provider,ai_model,created_at")
+        .eq("user_id", userId)
+        .eq("job_id", jobId)
+        .eq("id", id)
+        .maybeSingle();
+      if (committed.error) return cleanupUpload(`Unable to verify a concurrent CV insert: ${committed.error.message}`);
+      if (committed.data) return toGeneratedCv(committed.data);
+    }
+    return cleanupUpload("Unable to allocate a unique CV version after several attempts.");
+  }
+
+  async downloadGeneratedCv(
+    userId: string,
+    jobId: string,
+    id: string,
+    download: boolean,
+  ) {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from("generated_cvs")
+      .select("file_path,version")
+      .eq("user_id", userId)
+      .eq("job_id", jobId)
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw new Error(`Unable to load generated CV: ${error.message}`);
+    if (!data) throw new ResourceNotFoundError("CV");
+    const signed = download
+      ? await supabase.storage.from("generated-cvs").createSignedUrl(data.file_path, 60, { download: `cv-v${data.version}.pdf` })
+      : await supabase.storage.from("generated-cvs").createSignedUrl(data.file_path, 60);
+    if (signed.error) throw new Error(`Unable to open generated CV: ${signed.error.message}`);
+    return { kind: "redirect" as const, url: signed.data.signedUrl };
   }
 
   async resetForTests(): Promise<void> {

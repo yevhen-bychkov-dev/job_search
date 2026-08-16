@@ -13,6 +13,7 @@ test("sanitizes path separators and control characters from filenames", () => {
 
 test("accepts safe knowledge files and rejects unsupported or oversized files", async () => {
   assert.equal(await validateKnowledgeFile(new File(["safe"], "resume.txt", { type: "text/plain" })), "");
+  assert.equal(await validateKnowledgeFile(new File(["{}"], "profile.json", { type: "application/json" })), "");
   assert.match(await validateKnowledgeFile(new File(["x"], "script.html", { type: "text/html" })), /PDF/);
   const tooLarge = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "huge.pdf", { type: "application/pdf" });
   assert.match(await validateKnowledgeFile(tooLarge), /4 MB/);

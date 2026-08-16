@@ -9,6 +9,42 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      generated_cvs: {
+        Row: {
+          ai_model: string;
+          ai_provider: string;
+          content_json: Json;
+          created_at: string;
+          file_path: string;
+          id: string;
+          job_id: string;
+          user_id: string;
+          version: number;
+        };
+        Insert: {
+          ai_model: string;
+          ai_provider: string;
+          content_json: Json;
+          created_at?: string;
+          file_path: string;
+          id?: string;
+          job_id: string;
+          user_id: string;
+          version: number;
+        };
+        Update: {
+          ai_model?: string;
+          ai_provider?: string;
+          content_json?: Json;
+          created_at?: string;
+          file_path?: string;
+          id?: string;
+          job_id?: string;
+          user_id?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
       jobs: {
         Row: {
           applied_on: string | null;
@@ -129,6 +165,7 @@ export type Database = {
       knowledge_files: {
         Row: {
           created_at: string;
+          document_kind: Database["public"]["Enums"]["knowledge_document_kind"];
           id: string;
           mime_type: string;
           object_path: string;
@@ -138,6 +175,7 @@ export type Database = {
         };
         Insert: {
           created_at?: string;
+          document_kind?: Database["public"]["Enums"]["knowledge_document_kind"];
           id?: string;
           mime_type: string;
           object_path: string;
@@ -147,6 +185,7 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+          document_kind?: Database["public"]["Enums"]["knowledge_document_kind"];
           id?: string;
           mime_type?: string;
           object_path?: string;
@@ -200,6 +239,7 @@ export type Database = {
         | "offer"
         | "rejected"
         | "withdrawn";
+      knowledge_document_kind: "reference" | "candidate_profile";
       work_mode: "remote" | "hybrid" | "onsite" | "unspecified";
     };
     CompositeTypes: Record<string, never>;

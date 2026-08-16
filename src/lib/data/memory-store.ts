@@ -2,8 +2,11 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
+import { nextCvVersion } from "@/features/cvs/domain";
+import type { GeneratedCv } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
+import { parseCandidateProfileBytes, type CandidateProfile } from "@/features/knowledge/candidate-profile";
 import type { KnowledgeFile } from "@/features/knowledge/types";
 
 import {
@@ -19,11 +22,17 @@ type StoredKnowledgeFile = KnowledgeFile & {
   bytes: Uint8Array;
 };
 
+type StoredGeneratedCv = GeneratedCv & {
+  userId: string;
+  bytes: Uint8Array;
+};
+
 type MemoryState = {
   jobs: Array<Job & { userId: string; duplicateKey: string }>;
   history: Array<JobStatusHistory & { userId: string }>;
   filters: Map<string, FilterSettings>;
   files: StoredKnowledgeFile[];
+  generatedCvs: StoredGeneratedCv[];
   ignoredExternalJobs: Array<{ userId: string; source: string; externalJobId: string }>;
 };
 
@@ -32,7 +41,7 @@ declare global {
 }
 
 function initialState(): MemoryState {
-  return { jobs: [], history: [], filters: new Map(), files: [], ignoredExternalJobs: [] };
+  return { jobs: [], history: [], filters: new Map(), files: [], generatedCvs: [], ignoredExternalJobs: [] };
 }
 
 function state(): MemoryState {
@@ -83,7 +92,20 @@ function publicFile(record: StoredKnowledgeFile): KnowledgeFile {
     id: record.id,
     originalName: record.originalName,
     mimeType: record.mimeType,
+    documentKind: record.documentKind,
     sizeBytes: record.sizeBytes,
+    createdAt: record.createdAt,
+  };
+}
+
+function publicGeneratedCv(record: StoredGeneratedCv): GeneratedCv {
+  return {
+    id: record.id,
+    jobId: record.jobId,
+    version: record.version,
+    content: structuredClone(record.content),
+    aiProvider: record.aiProvider,
+    aiModel: record.aiModel,
     createdAt: record.createdAt,
   };
 }
@@ -257,6 +279,7 @@ export class MemoryAppStore implements AppStore {
     if (index < 0) throw new ResourceNotFoundError("Job");
     state().jobs.splice(index, 1);
     state().history = state().history.filter((event) => event.jobId !== id);
+    state().generatedCvs = state().generatedCvs.filter((cv) => cv.jobId !== id);
   }
 
   async listStatusHistory(userId: string, jobId?: string): Promise<JobStatusHistory[]> {
@@ -294,13 +317,14 @@ export class MemoryAppStore implements AppStore {
 
   async uploadKnowledgeFile(
     userId: string,
-    file: { filename: string; mimeType: string; bytes: Uint8Array },
+    file: { filename: string; mimeType: string; documentKind: KnowledgeFile["documentKind"]; bytes: Uint8Array },
   ): Promise<KnowledgeFile> {
     const stored: StoredKnowledgeFile = {
       id: crypto.randomUUID(),
       userId,
       originalName: file.filename,
       mimeType: file.mimeType,
+      documentKind: file.documentKind,
       sizeBytes: file.bytes.byteLength,
       createdAt: new Date().toISOString(),
       bytes: file.bytes,
@@ -324,6 +348,68 @@ export class MemoryAppStore implements AppStore {
     const index = state().files.findIndex((file) => file.userId === userId && file.id === id);
     if (index < 0) throw new ResourceNotFoundError("File");
     state().files.splice(index, 1);
+  }
+
+  async getCandidateProfile(userId: string): Promise<CandidateProfile | null> {
+    const candidate = state().files
+      .filter((file) => file.userId === userId && file.documentKind === "candidate_profile")
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    if (!candidate) return null;
+    const parsed = parseCandidateProfileBytes(candidate.bytes);
+    if (!parsed.ok) throw new Error(`Stored candidate profile is invalid: ${parsed.message}`);
+    return parsed.data;
+  }
+
+  async listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]> {
+    return state().generatedCvs
+      .filter((cv) => cv.userId === userId && cv.jobId === jobId)
+      .sort((left, right) => right.version - left.version)
+      .map(publicGeneratedCv);
+  }
+
+  async createGeneratedCv(
+    userId: string,
+    jobId: string,
+    input: { bytes: Uint8Array; content: GeneratedCv["content"]; aiProvider: string; aiModel: string },
+  ): Promise<GeneratedCv> {
+    if (!state().jobs.some((job) => job.userId === userId && job.id === jobId)) {
+      throw new ResourceNotFoundError("Job");
+    }
+    const version = nextCvVersion(
+      state().generatedCvs.filter((cv) => cv.jobId === jobId).map((cv) => cv.version),
+    );
+    const stored: StoredGeneratedCv = {
+      id: crypto.randomUUID(),
+      userId,
+      jobId,
+      version,
+      content: structuredClone(input.content),
+      aiProvider: input.aiProvider,
+      aiModel: input.aiModel,
+      createdAt: new Date().toISOString(),
+      bytes: input.bytes,
+    };
+    state().generatedCvs.push(stored);
+    return publicGeneratedCv(stored);
+  }
+
+  async downloadGeneratedCv(
+    userId: string,
+    jobId: string,
+    id: string,
+    _download: boolean,
+  ) {
+    void _download;
+    const cv = state().generatedCvs.find((candidate) =>
+      candidate.userId === userId && candidate.jobId === jobId && candidate.id === id
+    );
+    if (!cv) throw new ResourceNotFoundError("CV");
+    return {
+      kind: "content" as const,
+      bytes: cv.bytes,
+      mimeType: "application/pdf",
+      filename: `cv-v${cv.version}.pdf`,
+    };
   }
 
   async resetForTests(): Promise<void> {

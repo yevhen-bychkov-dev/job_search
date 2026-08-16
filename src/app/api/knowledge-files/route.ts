@@ -1,10 +1,12 @@
 import { getOptionalIdentity } from "@/features/auth/session";
 import {
+  KNOWLEDGE_DOCUMENT_KINDS,
   MAX_KNOWLEDGE_FILE_BYTES,
   sanitizeFilename,
   validateKnowledgeFileContent,
   validateKnowledgeFileMetadata,
 } from "@/features/knowledge/types";
+import { parseCandidateProfileBytes } from "@/features/knowledge/candidate-profile";
 import { getAppStore } from "@/lib/data/server-store";
 import { reportUnexpectedError } from "@/lib/server-errors";
 
@@ -22,6 +24,12 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const candidate = formData.get("file");
+    const documentKindValue = formData.get("documentKind");
+    const documentKind = typeof documentKindValue === "string"
+      && KNOWLEDGE_DOCUMENT_KINDS.includes(documentKindValue as (typeof KNOWLEDGE_DOCUMENT_KINDS)[number])
+      ? documentKindValue as (typeof KNOWLEDGE_DOCUMENT_KINDS)[number]
+      : null;
+    if (!documentKind) return Response.json({ message: "Choose a valid document type." }, { status: 400 });
     if (!(candidate instanceof File)) {
       return Response.json({ message: "Choose a file to upload." }, { status: 400 });
     }
@@ -30,9 +38,17 @@ export async function POST(request: Request) {
     const bytes = new Uint8Array(await candidate.arrayBuffer());
     const contentError = validateKnowledgeFileContent(candidate.type, bytes);
     if (contentError) return Response.json({ message: contentError }, { status: 400 });
+    if (documentKind === "candidate_profile") {
+      if (candidate.type !== "application/json") {
+        return Response.json({ message: "Candidate profiles must be uploaded as JSON." }, { status: 400 });
+      }
+      const profile = parseCandidateProfileBytes(bytes);
+      if (!profile.ok) return Response.json({ message: profile.message }, { status: 400 });
+    }
     await getAppStore().uploadKnowledgeFile(identity.userId, {
       filename: sanitizeFilename(candidate.name),
       mimeType: candidate.type,
+      documentKind,
       bytes,
     });
     return Response.json({ message: "File uploaded." }, { status: 201 });

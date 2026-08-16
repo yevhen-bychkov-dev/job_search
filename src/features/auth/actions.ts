@@ -7,7 +7,12 @@ import { isPlaywrightTestMode } from "@/lib/supabase/environment";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { reportUnexpectedError } from "@/lib/server-errors";
 
-import { TEST_IDENTITY, TEST_SESSION_COOKIE } from "./session";
+import {
+  SECONDARY_TEST_IDENTITY,
+  TEST_IDENTITY,
+  TEST_IDENTITY_COOKIE,
+  TEST_SESSION_COOKIE,
+} from "./session";
 import { safeAuthDestination, type AuthActionState } from "./types";
 
 export async function signInAction(
@@ -24,15 +29,29 @@ export async function signInAction(
   }
 
   if (isPlaywrightTestMode()) {
-    if (email !== TEST_IDENTITY.email || password !== "DemoPass!123") {
+    const testIdentity = [TEST_IDENTITY, SECONDARY_TEST_IDENTITY].find(
+      (candidate) => candidate.email === email,
+    );
+    if (!testIdentity || password !== "DemoPass!123") {
       return { status: "error", message: "Email or password is incorrect." };
     }
-    (await cookies()).set(TEST_SESSION_COOKIE, "authenticated", {
+    const cookieStore = await cookies();
+    cookieStore.set(TEST_SESSION_COOKIE, "authenticated", {
       httpOnly: true,
       sameSite: "lax",
       secure: false,
       path: "/",
     });
+    cookieStore.set(
+      TEST_IDENTITY_COOKIE,
+      testIdentity.userId === SECONDARY_TEST_IDENTITY.userId ? "secondary" : "primary",
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: false,
+        path: "/",
+      },
+    );
   } else {
     try {
       const supabase = await createServerSupabaseClient();
@@ -52,7 +71,9 @@ export async function signInAction(
 
 export async function signOutAction(): Promise<void> {
   if (isPlaywrightTestMode()) {
-    (await cookies()).delete(TEST_SESSION_COOKIE);
+    const cookieStore = await cookies();
+    cookieStore.delete(TEST_SESSION_COOKIE);
+    cookieStore.delete(TEST_IDENTITY_COOKIE);
   } else {
     const supabase = await createServerSupabaseClient();
     const { error } = await supabase.auth.signOut();

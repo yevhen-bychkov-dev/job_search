@@ -236,6 +236,10 @@ tbody tr:hover { background: #fbfcff; }
 
 .upload-panel { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
 .upload-panel .field { flex: 1; }
+.upload-panel .upload-kind-field { flex: 0 1 220px; }
+.profile-guide summary { color: var(--ink); font-weight: 720; cursor: pointer; }
+.profile-guide p { color: var(--muted); font-size: .84rem; }
+.profile-guide pre { max-height: 420px; overflow: auto; margin: 14px 0 0; padding: 16px; color: #dce4fb; border-radius: 9px; background: #17213a; font-size: .74rem; line-height: 1.55; white-space: pre-wrap; }
 .file-list { display: grid; }
 .file-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 15px 0; border-top: 1px solid #eef0f3; }
 .file-icon { display: grid; width: 42px; height: 42px; place-items: center; color: #3538cd; border-radius: 9px; background: #eef4ff; font-size: .62rem; font-weight: 800; }
@@ -244,6 +248,14 @@ tbody tr:hover { background: #fbfcff; }
 .file-row > div:nth-child(2) span { color: var(--muted); font-size: .76rem; }
 .file-actions { display: flex; gap: 8px; }
 .file-actions .button-danger { min-height: 34px; padding: 7px 11px; font-size: .8rem; }
+
+.cv-generate-form { display: flex; align-items: center; gap: 12px; }
+.cv-empty { padding: 18px 0 4px; color: var(--muted); border-top: 1px solid #eef0f3; }
+.cv-empty p { margin: 0; }
+.cv-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.cv-list li { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 0; border-top: 1px solid #eef0f3; }
+.cv-list li > div:first-child { display: grid; gap: 2px; }
+.cv-list li span { color: var(--muted); font-size: .76rem; }
 
 .account-card { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 20px; }
 .account-card h2 { margin: 5px 0; font-size: 1.25rem; }
@@ -379,6 +391,9 @@ body.drawer-open { overflow: hidden; }
   .status-form label { grid-column: auto; }
   .file-row { grid-template-columns: auto 1fr; }
   .file-actions { grid-column: 1 / -1; }
+  .cv-generate-form, .cv-list li { align-items: stretch; flex-direction: column; }
+  .cv-generate-form .button { width: 100%; }
+  .cv-list .file-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .account-card { grid-template-columns: 1fr; }
   .discovery-filter-grid { grid-template-columns: 1fr; }
   .discovery-mode-fieldset { flex-wrap: wrap; padding-block: 8px; }
