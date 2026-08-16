@@ -23,15 +23,48 @@ function locationSlug(value: string): string {
     .slice(0, 100);
 }
 
+export const JUST_JOIN_FILTER_OPTIONS = {
+  categories: [
+    { value: "javascript", label: "JavaScript" },
+    { value: "html", label: "HTML" },
+    { value: "python", label: "Python" },
+    { value: "java", label: "Java" },
+    { value: "net", label: ".NET" },
+    { value: "mobile", label: "Mobile" },
+    { value: "testing", label: "Testing" },
+    { value: "devops", label: "DevOps" },
+    { value: "data", label: "Data" },
+    { value: "security", label: "Security" },
+    { value: "architecture", label: "Architecture" },
+    { value: "other", label: "Other" },
+  ],
+  technologies: [],
+  seniorities: [
+    { value: "intern", label: "Intern" },
+    { value: "junior", label: "Junior" },
+    { value: "mid", label: "Mid" },
+    { value: "senior", label: "Senior" },
+    { value: "lead", label: "Team leader / manager" },
+    { value: "c-level", label: "C-level" },
+  ],
+} as const;
+
 export function buildJustJoinSearchUrl(filters: JobSearchFilters): URL {
   const location = locationSlug(filters.location) || "all-locations";
-  const url = new URL(`https://justjoin.it/job-offers/${encodeURIComponent(location)}`);
+  const category = filters.categories[0];
+  const path = category
+    ? `/job-offers/${encodeURIComponent(location)}/${encodeURIComponent(category)}`
+    : `/job-offers/${encodeURIComponent(location)}`;
+  const url = new URL(`https://justjoin.it${path}`);
   if (filters.keywords) url.searchParams.set("keyword", filters.keywords);
   if (filters.workModes.length > 0) {
     url.searchParams.set(
       "remote-work-options",
       filters.workModes.map((mode) => mode === "onsite" ? "office" : mode).join(","),
     );
+  }
+  if (filters.seniorities.length > 0) {
+    url.searchParams.set("experience-level", filters.seniorities.join(","));
   }
   url.searchParams.set("sortBy", "published");
   return url;
@@ -62,6 +95,7 @@ const SYNTHETIC_JOBS: NormalizedExternalJob[] = [
 export class JustJoinAdapter implements JobSourceAdapter {
   readonly id = "justjoinit" as const;
   readonly name = "JustJoinIT";
+  readonly filterOptions = JUST_JOIN_FILTER_OPTIONS;
 
   async searchJobs(filters: JobSearchFilters): Promise<ExternalJobSearchResult> {
     if (isPlaywrightTestMode()) {

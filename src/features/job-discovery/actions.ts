@@ -6,7 +6,7 @@ import { requireIdentity } from "@/features/auth/session";
 import { DuplicateJobError } from "@/lib/data/contracts";
 import { getAppStore } from "@/lib/data/server-store";
 import { getJobSource } from "@/lib/job-sources/registry";
-import type { NormalizedExternalJob } from "@/lib/job-sources/types";
+import type { JobSearchFilters, NormalizedExternalJob } from "@/lib/job-sources/types";
 import { reportUnexpectedError } from "@/lib/server-errors";
 
 import {
@@ -22,11 +22,24 @@ export type DiscoverySearchState =
   | { status: "success"; jobs: NormalizedExternalJob[]; sourceResultCount: number; sourceBatchLimit: number; sourceHasMore: boolean }
   | { status: "error"; message: string };
 
+function filtersSupportedBySource(
+  source: NonNullable<ReturnType<typeof getJobSource>>,
+  filters: JobSearchFilters,
+): boolean {
+  const allowed = (key: "categories" | "technologies" | "seniorities") =>
+    new Set(source.filterOptions[key].map((option) => option.value));
+  return filters.categories.every((value) => allowed("categories").has(value))
+    && filters.technologies.every((value) => allowed("technologies").has(value))
+    && filters.seniorities.every((value) => allowed("seniorities").has(value));
+}
+
 export async function searchExternalJobsAction(sourceId: string, rawFilters: unknown): Promise<DiscoverySearchState> {
   const identity = await requireIdentity();
   const source = getJobSource(sourceId);
   const filters = parseDiscoveryFilters(rawFilters);
-  if (!source || !filters) return { status: "error", message: "Choose valid search filters and try again." };
+  if (!source || !filters || !filtersSupportedBySource(source, filters)) {
+    return { status: "error", message: "Choose valid search filters and try again." };
+  }
   try {
     const [result, known] = await Promise.all([
       source.searchJobs(filters),
@@ -40,8 +53,8 @@ export async function searchExternalJobsAction(sourceId: string, rawFilters: unk
       sourceHasMore: result.sourceHasMore,
     };
   } catch (error) {
-    reportUnexpectedError("job-discovery.search", error);
-    return { status: "error", message: "JustJoinIT could not be reached or its response changed. Try again shortly." };
+    reportUnexpectedError(`job-discovery.search.${source.id}`, error);
+    return { status: "error", message: `Could not load jobs from ${source.name}. Try again.` };
   }
 }
 

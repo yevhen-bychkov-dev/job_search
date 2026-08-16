@@ -13,10 +13,22 @@ import type {
 
 const SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const EXTERNAL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+const FILTER_VALUE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 .+/_-]{0,59}$/;
 const DISCOVERY_WORK_MODES = new Set<WorkMode>(["remote", "hybrid", "onsite"]);
 
 function trimmed(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function filterValues(value: unknown, maxItems: number): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > maxItems) return null;
+  const parsed = value.flatMap((item) => {
+    const text = trimmed(item, 60);
+    return text && FILTER_VALUE_PATTERN.test(text) ? [text] : [];
+  });
+  if (parsed.length !== value.length) return null;
+  return [...new Set(parsed)];
 }
 
 export function parseDiscoveryFilters(value: unknown): JobSearchFilters | null {
@@ -26,11 +38,17 @@ export function parseDiscoveryFilters(value: unknown): JobSearchFilters | null {
   const workModes = rawModes.filter(
     (mode): mode is WorkMode => typeof mode === "string" && DISCOVERY_WORK_MODES.has(mode as WorkMode),
   );
-  if (workModes.length !== rawModes.length) return null;
+  const categories = filterValues(input.categories, 1);
+  const technologies = filterValues(input.technologies, 8);
+  const seniorities = filterValues(input.seniorities, 6);
+  if (workModes.length !== rawModes.length || !categories || !technologies || !seniorities) return null;
   return {
     keywords: trimmed(input.keywords, 120),
     location: trimmed(input.location, 120),
     workModes: [...new Set(workModes)],
+    categories,
+    technologies,
+    seniorities,
   };
 }
 
@@ -45,7 +63,7 @@ export function parseExternalJob(value: unknown): NormalizedExternalJob | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
   if (!isValidExternalIdentity(input.source, input.externalId)) return null;
-  const source = input.source === "justjoinit" ? input.source : null;
+  const source = input.source === "justjoinit" || input.source === "nofluffjobs" ? input.source : null;
   const title = trimmed(input.title, 200);
   const company = trimmed(input.company, 200);
   const urlValue = trimmed(input.url, 2048);
@@ -58,6 +76,7 @@ export function parseExternalJob(value: unknown): NormalizedExternalJob | null {
   }
   if (url.protocol !== "https:" || url.username || url.password) return null;
   if (source === "justjoinit" && (url.hostname !== "justjoin.it" || !url.pathname.startsWith("/job-offer/"))) return null;
+  if (source === "nofluffjobs" && (url.hostname !== "nofluffjobs.com" || !url.pathname.startsWith("/pl/job/"))) return null;
   const workMode = typeof input.workMode === "string" && WORK_MODES.includes(input.workMode as WorkMode)
     ? input.workMode as WorkMode
     : null;
@@ -85,7 +104,7 @@ export function parseExternalJob(value: unknown): NormalizedExternalJob | null {
   }
   return {
     source,
-    sourceName: source === "justjoinit" ? "JustJoinIT" : trimmed(input.sourceName, 120),
+    sourceName: source === "justjoinit" ? "JustJoinIT" : "NoFluffJobs",
     externalId: String(input.externalId),
     title,
     company,

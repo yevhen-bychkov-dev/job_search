@@ -209,6 +209,42 @@ test("discover, inspect, bulk add, and permanently hide external jobs", async ({
   await expect(page.getByText("No new jobs found")).toBeVisible();
 });
 
+test("NoFluffJobs keeps independent filters, results, selection, and import state", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Discover", exact: true }).click();
+
+  await page.getByLabel("Keywords or technologies").fill("Software");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Software Engineer", exact: true })).toBeVisible();
+
+  await page.getByRole("tab", { name: "NoFluffJobs" }).click();
+  await expect(page.getByRole("tab", { name: "NoFluffJobs" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("Category")).toBeVisible();
+  await expect(page.getByLabel("Technology")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Seniority" })).toBeVisible();
+  await page.getByLabel("Keywords or technologies").fill("React");
+  await page.getByLabel("Technology").selectOption("react");
+  await expect(page.getByRole("heading", { name: "Search current vacancies" })).toBeVisible();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Senior Frontend Engineer", exact: true })).toBeVisible();
+  await page.getByLabel("Select Senior Frontend Engineer at Synthetic No Fluff Studio").check();
+
+  await page.getByRole("tab", { name: "JustJoinIT" }).click();
+  await expect(page.getByRole("button", { name: "Software Engineer", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Keywords or technologies")).toHaveValue("Software");
+
+  await page.getByRole("tab", { name: "NoFluffJobs" }).click();
+  await expect(page.getByRole("button", { name: "Add selected (1)" })).toBeEnabled();
+  await expect(page.getByLabel("Keywords or technologies")).toHaveValue("React");
+  await expect(page.getByLabel("Technology")).toHaveValue("react");
+  await page.getByRole("button", { name: "Add selected (1)" }).click();
+  await expect(page.getByText("Added 1 job.")).toBeVisible();
+  await expect(page.getByText("No new jobs found")).toBeVisible();
+
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await expect(page.getByRole("link", { name: /Senior Frontend Engineer/ })).toBeVisible();
+});
+
 test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
   await signIn(page);
   await page.getByRole("link", { name: "Knowledge Base", exact: true }).click();

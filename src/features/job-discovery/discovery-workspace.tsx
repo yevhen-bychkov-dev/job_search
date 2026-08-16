@@ -9,8 +9,13 @@ import {
   useTransition,
 } from "react";
 
-import { WORK_MODE_LABELS, type WorkMode } from "@/features/jobs/types";
-import type { JobSearchFilters, JobSourceId, NormalizedExternalJob } from "@/lib/job-sources/types";
+import { WORK_MODE_LABELS } from "@/features/jobs/types";
+import type {
+  JobSearchFilters,
+  JobSourceDefinition,
+  JobSourceId,
+  NormalizedExternalJob,
+} from "@/lib/job-sources/types";
 
 import {
   addExternalJobsAction,
@@ -19,9 +24,44 @@ import {
   searchExternalJobsAction,
 } from "./actions";
 import { formatExternalSalary } from "./domain";
+import { SourceSearchForm } from "./source-search-form";
 
 const PAGE_SIZE = 25;
-const EMPTY_FILTERS: JobSearchFilters = { keywords: "", location: "", workModes: [] };
+
+function emptyFilters(): JobSearchFilters {
+  return {
+    keywords: "",
+    location: "",
+    workModes: [],
+    categories: [],
+    technologies: [],
+    seniorities: [],
+  };
+}
+
+type SourceSearchState = {
+  jobs: NormalizedExternalJob[];
+  selectedIds: Set<string>;
+  visibleCount: number;
+  hasSearched: boolean;
+  searchError: string;
+  sourceInfo: { total: number; batchLimit: number; hasMore: boolean };
+};
+
+function emptySearchState(): SourceSearchState {
+  return {
+    jobs: [],
+    selectedIds: new Set(),
+    visibleCount: PAGE_SIZE,
+    hasSearched: false,
+    searchError: "",
+    sourceInfo: { total: 0, batchLimit: 0, hasMore: false },
+  };
+}
+
+function jobKey(job: Pick<NormalizedExternalJob, "source" | "externalId">): string {
+  return `${job.source}:${job.externalId}`;
+}
 
 function postedDate(value?: string): string {
   if (!value) return "Unknown";
@@ -151,26 +191,32 @@ function DiscoveryDrawer({
   );
 }
 
-export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<{ id: JobSourceId; name: string }> }) {
+export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSourceDefinition> }) {
   const [activeSource, setActiveSource] = useState<JobSourceId>(sources[0]?.id ?? "justjoinit");
-  const [filtersBySource, setFiltersBySource] = useState<Record<JobSourceId, JobSearchFilters>>({ justjoinit: EMPTY_FILTERS });
-  const [jobs, setJobs] = useState<NormalizedExternalJob[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [filtersBySource, setFiltersBySource] = useState<Record<JobSourceId, JobSearchFilters>>({
+    justjoinit: emptyFilters(),
+    nofluffjobs: emptyFilters(),
+  });
+  const [searchBySource, setSearchBySource] = useState<Record<JobSourceId, SourceSearchState>>({
+    justjoinit: emptySearchState(),
+    nofluffjobs: emptySearchState(),
+  });
   const [drawerJob, setDrawerJob] = useState<NormalizedExternalJob | null>(null);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [hasSearched, setHasSearched] = useState(false);
-  const [searchError, setSearchError] = useState("");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-  const [sourceInfo, setSourceInfo] = useState({ total: 0, batchLimit: 0, hasMore: false });
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
-  const [isSearching, startSearch] = useTransition();
+  const [searchingSources, setSearchingSources] = useState<Set<JobSourceId>>(new Set());
+  const [, startSearch] = useTransition();
   const [isBulkAdding, startBulkAdd] = useTransition();
   const selectAllRef = useRef<HTMLInputElement>(null);
+  const source = sources.find((item) => item.id === activeSource) ?? sources[0];
   const filters = filtersBySource[activeSource];
+  const searchState = searchBySource[activeSource];
+  const { jobs, selectedIds, visibleCount, hasSearched, searchError, sourceInfo } = searchState;
   const visibleJobs = jobs.slice(0, visibleCount);
   const visibleIds = visibleJobs.map((job) => job.externalId);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   const someVisibleSelected = visibleIds.some((id) => selectedIds.has(id));
+  const isSearching = searchingSources.has(activeSource);
 
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = someVisibleSelected && !allVisibleSelected;
@@ -183,66 +229,85 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<{ id: J
     }));
   }
 
-  function runSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setNotice(null);
-    setSearchError("");
-    startSearch(async () => {
-      const result = await searchExternalJobsAction(activeSource, filters);
-      setHasSearched(true);
-      setSelectedIds(new Set());
-      setDrawerJob(null);
-      setVisibleCount(PAGE_SIZE);
-      if (result.status === "error") {
-        setJobs([]);
-        setSearchError(result.message);
-        return;
-      }
-      setJobs(result.jobs);
-      setSourceInfo({ total: result.sourceResultCount, batchLimit: result.sourceBatchLimit, hasMore: result.sourceHasMore });
-    });
+  function updateSearchState(
+    sourceId: JobSourceId,
+    update: (current: SourceSearchState) => SourceSearchState,
+  ) {
+    setSearchBySource((current) => ({ ...current, [sourceId]: update(current[sourceId]) }));
   }
 
-  function toggleMode(mode: WorkMode) {
-    updateFilters({
-      workModes: filters.workModes.includes(mode)
-        ? filters.workModes.filter((value) => value !== mode)
-        : [...filters.workModes, mode],
+  function runSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const submittedSource = activeSource;
+    const submittedFilters = filtersBySource[submittedSource];
+    setNotice(null);
+    setSearchingSources((current) => new Set(current).add(submittedSource));
+    updateSearchState(submittedSource, (current) => ({ ...current, searchError: "" }));
+    startSearch(async () => {
+      try {
+        const result = await searchExternalJobsAction(submittedSource, submittedFilters);
+        updateSearchState(submittedSource, (current) => ({
+          ...current,
+          jobs: result.status === "success" ? result.jobs : [],
+          selectedIds: new Set(),
+          visibleCount: PAGE_SIZE,
+          hasSearched: true,
+          searchError: result.status === "error" ? result.message : "",
+          sourceInfo: result.status === "success"
+            ? { total: result.sourceResultCount, batchLimit: result.sourceBatchLimit, hasMore: result.sourceHasMore }
+            : current.sourceInfo,
+        }));
+        setDrawerJob((current) => current?.source === submittedSource ? null : current);
+      } finally {
+        setSearchingSources((current) => {
+          const next = new Set(current);
+          next.delete(submittedSource);
+          return next;
+        });
+      }
     });
   }
 
   function toggleSelected(externalId: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
+    updateSearchState(activeSource, (current) => {
+      const next = new Set(current.selectedIds);
       if (next.has(externalId)) next.delete(externalId); else next.add(externalId);
-      return next;
+      return { ...current, selectedIds: next };
     });
   }
 
   function toggleSelectAll() {
-    setSelectedIds((current) => {
-      const next = new Set(current);
+    updateSearchState(activeSource, (current) => {
+      const next = new Set(current.selectedIds);
       if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
       else visibleIds.forEach((id) => next.add(id));
-      return next;
+      return { ...current, selectedIds: next };
     });
   }
 
   async function addJobs(toAdd: NormalizedExternalJob[]) {
-    setBusyIds((current) => new Set([...current, ...toAdd.map((job) => job.externalId)]));
+    const sourceId = toAdd[0]?.source;
+    if (!sourceId || toAdd.some((job) => job.source !== sourceId)) {
+      setNotice({ kind: "error", message: "Select jobs from one source and try again." });
+      return;
+    }
+    setBusyIds((current) => new Set([...current, ...toAdd.map(jobKey)]));
     const result = await addExternalJobsAction(toAdd);
     if (result.status === "success") {
       const processed = new Set(result.processedExternalIds);
-      setJobs((current) => current.filter((job) => !processed.has(job.externalId)));
-      setSelectedIds((current) => new Set([...current].filter((id) => !processed.has(id))));
-      if (drawerJob && processed.has(drawerJob.externalId)) setDrawerJob(null);
+      updateSearchState(sourceId, (current) => ({
+        ...current,
+        jobs: current.jobs.filter((job) => !processed.has(job.externalId)),
+        selectedIds: new Set([...current.selectedIds].filter((id) => !processed.has(id))),
+      }));
+      if (drawerJob?.source === sourceId && processed.has(drawerJob.externalId)) setDrawerJob(null);
       setNotice({ kind: "success", message: result.message });
     } else {
       setNotice({ kind: "error", message: result.message });
     }
     setBusyIds((current) => {
       const next = new Set(current);
-      toAdd.forEach((job) => next.delete(job.externalId));
+      toAdd.forEach((job) => next.delete(jobKey(job)));
       return next;
     });
   }
@@ -253,23 +318,26 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<{ id: J
   }
 
   async function hideJob(job: NormalizedExternalJob) {
-    setBusyIds((current) => new Set(current).add(job.externalId));
+    setBusyIds((current) => new Set(current).add(jobKey(job)));
     const result = await ignoreExternalJobAction(job.source, job.externalId);
     if (result.status === "success") {
-      setJobs((current) => current.filter((item) => item.externalId !== job.externalId));
-      setSelectedIds((current) => {
-        const next = new Set(current);
+      updateSearchState(job.source, (current) => {
+        const next = new Set(current.selectedIds);
         next.delete(job.externalId);
-        return next;
+        return {
+          ...current,
+          jobs: current.jobs.filter((item) => item.externalId !== job.externalId),
+          selectedIds: next,
+        };
       });
-      if (drawerJob?.externalId === job.externalId) setDrawerJob(null);
+      if (drawerJob?.source === job.source && drawerJob.externalId === job.externalId) setDrawerJob(null);
       setNotice({ kind: "success", message: result.message });
     } else {
       setNotice({ kind: "error", message: result.message });
     }
     setBusyIds((current) => {
       const next = new Set(current);
-      next.delete(job.externalId);
+      next.delete(jobKey(job));
       return next;
     });
   }
@@ -278,6 +346,8 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<{ id: J
     if ((event.target as HTMLElement).closest("button,input,a")) return;
     setDrawerJob(job);
   }
+
+  if (!source) return null;
 
   return (
     <div className="stack discovery-workspace">
@@ -289,55 +359,50 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<{ id: J
             role="tab"
             aria-selected={activeSource === source.id}
             className={activeSource === source.id ? "source-tab active" : "source-tab"}
-            onClick={() => setActiveSource(source.id)}
+            onClick={() => {
+              setActiveSource(source.id);
+              setDrawerJob(null);
+              setNotice(null);
+            }}
           >{source.name}</button>
         ))}
       </div>
 
-      <form className="card discovery-filters" onSubmit={runSearch} aria-label="Discover jobs filters">
-        <div className="field">
-          <label htmlFor="discovery-keywords">Keywords or technologies</label>
-          <input id="discovery-keywords" value={filters.keywords} maxLength={120} placeholder="React, TypeScript, frontend…" onChange={(event) => updateFilters({ keywords: event.target.value })} />
-        </div>
-        <div className="field">
-          <label htmlFor="discovery-location">Location</label>
-          <input id="discovery-location" value={filters.location} maxLength={120} placeholder="Warszawa or leave blank" onChange={(event) => updateFilters({ location: event.target.value })} />
-        </div>
-        <fieldset className="discovery-mode-fieldset">
-          <legend>Work mode</legend>
-          {(["remote", "hybrid", "onsite"] as const).map((mode) => (
-            <label key={mode}><input type="checkbox" checked={filters.workModes.includes(mode)} onChange={() => toggleMode(mode)} /> {WORK_MODE_LABELS[mode]}</label>
-          ))}
-        </fieldset>
-        <button className="button button-primary discovery-search-button" type="submit" disabled={isSearching}>{isSearching ? "Searching…" : "Search"}</button>
-      </form>
+      <SourceSearchForm
+        source={source}
+        filters={filters}
+        busy={isSearching}
+        onUpdate={updateFilters}
+        onSubmit={runSearch}
+      />
 
       {notice && <p className={`alert alert-${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.message}</p>}
       {searchError && <section className="empty-state compact" role="alert"><span className="empty-icon">!</span><h2>Source unavailable</h2><p>{searchError}</p></section>}
       {!hasSearched && !isSearching && <section className="empty-state"><span className="empty-icon">⌕</span><h2>Search current vacancies</h2><p>Choose filters, then select Search. Filters never send requests automatically.</p></section>}
-      {isSearching && <div className="page-loading" role="status"><span className="spinner" />Searching JustJoinIT…</div>}
+      {isSearching && <div className="page-loading" role="status"><span className="spinner" />Searching {source.name}…</div>}
       {hasSearched && !isSearching && !searchError && jobs.length === 0 && <section className="empty-state"><span className="empty-icon">0</span><h2>No new jobs found</h2><p>Try broader filters. Jobs already saved or hidden are removed automatically.</p></section>}
 
       {jobs.length > 0 && !isSearching && (
-        <section className="stack" aria-labelledby="discovery-results-heading">
+        <section className="stack" aria-labelledby={`discovery-results-heading-${activeSource}`}>
           <div className="discovery-results-toolbar">
-            <div><h2 id="discovery-results-heading">Search results</h2><p>{jobs.length} new of {sourceInfo.total} source matches</p></div>
+            <div><h2 id={`discovery-results-heading-${activeSource}`}>Search results</h2><p>{jobs.length} new of {sourceInfo.total} source matches</p></div>
             <button className="button button-primary" type="button" disabled={selectedIds.size === 0 || isBulkAdding} onClick={addSelected}>{isBulkAdding ? "Adding…" : `Add selected (${selectedIds.size})`}</button>
           </div>
-          {sourceInfo.hasMore && <p className="alert discovery-limit-note">JustJoinIT returned its newest {sourceInfo.batchLimit} matches. Refine filters to reach older vacancies.</p>}
+          {sourceInfo.hasMore && <p className="alert discovery-limit-note">{source.name} returned its newest {sourceInfo.batchLimit} matches. Refine filters to reach older vacancies.</p>}
           <div className="card table-wrap">
             <table className="discovery-table">
               <thead><tr>
                 <th className="selection-cell"><input ref={selectAllRef} type="checkbox" aria-label="Select all displayed jobs" checked={allVisibleSelected} onChange={toggleSelectAll} /></th>
-                <th>Title</th><th>Company</th><th>Location</th><th>Work mode</th><th>Technologies</th><th>Posted</th><th>Actions</th>
+                <th>Title</th><th>Company</th><th>Location</th><th>Work mode</th><th>Technologies</th><th>Source</th><th>Posted</th><th>Actions</th>
               </tr></thead>
               <tbody>{visibleJobs.map((job) => {
-                const busy = busyIds.has(job.externalId);
+                const busy = busyIds.has(jobKey(job));
                 return <tr key={`${job.source}:${job.externalId}`} className="discovery-row" onClick={(event) => rowClick(event, job)}>
                   <td className="selection-cell"><input type="checkbox" aria-label={`Select ${job.title} at ${job.company}`} checked={selectedIds.has(job.externalId)} onChange={() => toggleSelected(job.externalId)} /></td>
                   <td><button className="discovery-title-button" type="button" onClick={() => setDrawerJob(job)}>{job.title}</button></td>
                   <td>{job.company}</td><td>{job.location || "—"}</td><td>{WORK_MODE_LABELS[job.workMode]}</td>
                   <td><span className="technology-cell" title={job.technologies.join(", ")}>{job.technologies.slice(0, 3).join(", ") || "—"}{job.technologies.length > 3 ? ` +${job.technologies.length - 3}` : ""}</span></td>
+                  <td>{job.sourceName}</td>
                   <td><time dateTime={job.postedAt}>{postedDate(job.postedAt)}</time></td>
                   <td><div className="discovery-row-actions"><button type="button" className="text-button" disabled={busy} onClick={() => void addJobs([job])}>Add</button><button type="button" className="text-button danger" disabled={busy} onClick={() => void hideJob(job)}>Hide</button></div></td>
                 </tr>;
@@ -345,18 +410,21 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<{ id: J
             </table>
             <p className="table-note">Showing {visibleJobs.length} of {jobs.length} new vacancies, newest first.</p>
           </div>
-          {visibleCount < jobs.length && <button className="button button-secondary load-more-button" type="button" onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}>Load more</button>}
+          {visibleCount < jobs.length && <button className="button button-secondary load-more-button" type="button" onClick={() => updateSearchState(activeSource, (current) => ({ ...current, visibleCount: current.visibleCount + PAGE_SIZE }))}>Load more</button>}
         </section>
       )}
 
       {drawerJob && <DiscoveryDrawer
         job={drawerJob}
-        busy={busyIds.has(drawerJob.externalId)}
+        busy={busyIds.has(jobKey(drawerJob))}
         onClose={() => setDrawerJob(null)}
         onAdd={() => addJobs([drawerJob])}
         onHide={() => hideJob(drawerJob)}
         onDescription={(description) => {
-          setJobs((current) => current.map((job) => job.externalId === drawerJob.externalId ? { ...job, description } : job));
+          updateSearchState(drawerJob.source, (current) => ({
+            ...current,
+            jobs: current.jobs.map((job) => job.externalId === drawerJob.externalId ? { ...job, description } : job),
+          }));
           setDrawerJob((current) => current ? { ...current, description } : current);
         }}
       />}
