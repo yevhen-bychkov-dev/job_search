@@ -4,7 +4,7 @@ import test from "node:test";
 import { CvAiProviderError, extractGeminiStructuredResponse, selectionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
 import { buildGeminiCvRequest } from "../../src/features/cvs/ai/gemini-request.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
-import { materializeGeneratedCv, nextCvVersion, parseCvSelection } from "../../src/features/cvs/domain.ts";
+import { materializeGeneratedCv, nextCvVersion, parseCvSelection, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
 import { renderCvPdf } from "../../src/features/cvs/pdf.ts";
 
 function profile() {
@@ -50,6 +50,26 @@ test("model selections materialize only exact verified facts", () => {
   ]);
   assert.equal(generated.data.summary, candidate.summary);
   assert.deepEqual(generated.data.skills, ["TypeScript", "React"]);
+});
+
+test("stored CV content accepts the candidate profile achievement length limit", () => {
+  const content = {
+    headline: "Frontend Engineer",
+    summary: null,
+    skills: ["TypeScript"],
+    experience: [{
+      company: "Synthetic Labs",
+      role: "Frontend Engineer",
+      startDate: "2023",
+      endDate: null,
+      technologies: ["TypeScript"],
+      achievements: ["A".repeat(600)],
+    }],
+    education: [],
+  };
+  assert.equal(parseGeneratedCvContent(content).ok, true);
+  content.experience[0].achievements = ["A".repeat(601)];
+  assert.equal(parseGeneratedCvContent(content).ok, false);
 });
 
 test("invalid or invented model selections are rejected", () => {

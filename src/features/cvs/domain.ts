@@ -13,8 +13,15 @@ function hasOnlyKeys(record: Record<string, unknown>, allowed: readonly string[]
   return Object.keys(record).every((key) => keys.has(key));
 }
 
-function stringList(value: unknown, field: string, maximum: number): ParseResult<string[]> {
-  if (!Array.isArray(value) || value.length > maximum || !value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160)) {
+function stringList(
+  value: unknown,
+  field: string,
+  maximumItems: number,
+  maximumItemLength = 160,
+): ParseResult<string[]> {
+  if (!Array.isArray(value) || value.length > maximumItems || !value.every((item) =>
+    typeof item === "string" && item.length > 0 && item.length <= maximumItemLength
+  )) {
     return { ok: false, message: `${field} is invalid.` };
   }
   if (new Set(value).size !== value.length) return { ok: false, message: `${field} contains duplicate values.` };
@@ -118,7 +125,7 @@ export function parseGeneratedCvContent(value: unknown): ParseResult<GeneratedCv
   for (const candidate of value.experience) {
     if (!isRecord(candidate) || !hasOnlyKeys(candidate, ["company", "role", "startDate", "endDate", "technologies", "achievements"])) return { ok: false, message: "Stored CV experience is invalid." };
     const technologies = stringList(candidate.technologies, "technologies", 50);
-    const achievements = stringList(candidate.achievements, "achievements", 30);
+    const achievements = stringList(candidate.achievements, "achievements", 30, 600);
     if (typeof candidate.company !== "string" || typeof candidate.role !== "string" || !nullableText(candidate.startDate) || !nullableText(candidate.endDate) || !technologies.ok || !achievements.ok) return { ok: false, message: "Stored CV experience is invalid." };
     experience.push({ company: candidate.company, role: candidate.role, startDate: candidate.startDate as string | null, endDate: candidate.endDate as string | null, technologies: technologies.data, achievements: achievements.data });
   }
