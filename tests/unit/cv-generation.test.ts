@@ -72,17 +72,22 @@ test("version calculation always advances the highest valid version", () => {
   assert.equal(nextCvVersion([0, -1, 2.5, 2]), 3);
 });
 
-test("Gemini schema constrains selection to verified source values", () => {
+test("Gemini schema constrains response shape without embedding candidate enums", () => {
   const candidate = profile();
   const schema = selectionJsonSchema({
     job: { title: "Frontend Engineer", company: "Synthetic Co", description: "React role", technologies: ["React"] },
     candidate: candidateProfileForAi(candidate),
   });
   const serialized = JSON.stringify(schema);
-  assert.match(serialized, /synthetic-labs-frontend/);
-  assert.match(serialized, /accessible-design-system/);
-  assert.match(serialized, /TypeScript/);
+  assert.doesNotMatch(serialized, /synthetic-labs-frontend/);
+  assert.doesNotMatch(serialized, /accessible-design-system/);
+  assert.doesNotMatch(serialized, /TypeScript/);
   assert.doesNotMatch(serialized, /alex@example\.test/i);
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  assert.equal(properties.skillOrder.maxItems, candidate.skills.length);
+  assert.equal(properties.experience.maxItems, candidate.experience.length);
+  assert.equal(properties.educationIds.maxItems, candidate.education.length);
+  assert.ok(serialized.length < 2_000);
 });
 
 test("Gemini request includes saved-job context and excludes contact PII", () => {

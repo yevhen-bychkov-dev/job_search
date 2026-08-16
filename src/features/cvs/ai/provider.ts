@@ -29,11 +29,10 @@ export class CvAiProviderError extends Error {
 }
 
 export function selectionJsonSchema(input: GenerateCvInput): Record<string, unknown> {
-  const experienceIds = input.candidate.experience.map((experience) => experience.id);
-  const achievementIds = input.candidate.experience.flatMap((experience) =>
-    experience.achievements.map((achievement) => achievement.id),
+  const maximumAchievements = input.candidate.experience.reduce(
+    (maximum, experience) => Math.max(maximum, experience.achievements.length),
+    0,
   );
-  const educationIds = input.candidate.education.map((education) => education.id);
   return {
     type: "object",
     additionalProperties: false,
@@ -46,31 +45,43 @@ export function selectionJsonSchema(input: GenerateCvInput): Record<string, unkn
       skillOrder: {
         type: "array",
         maxItems: input.candidate.skills.length,
-        items: { type: "string", enum: input.candidate.skills },
+        items: {
+          type: "string",
+          description: "An exact skill string from Candidate Profile.",
+        },
         description: "Relevant verified skills, ordered most relevant first.",
       },
       experience: {
         type: "array",
         minItems: 1,
-        maxItems: experienceIds.length,
+        maxItems: input.candidate.experience.length,
         items: {
           type: "object",
           additionalProperties: false,
           required: ["experienceId", "achievementIds"],
           properties: {
-            experienceId: { type: "string", enum: experienceIds },
+            experienceId: {
+              type: "string",
+              description: "An exact experience id from Candidate Profile.",
+            },
             achievementIds: {
               type: "array",
-              maxItems: achievementIds.length,
-              items: { type: "string", enum: achievementIds },
+              maxItems: maximumAchievements,
+              items: {
+                type: "string",
+                description: "An exact achievement id belonging to the selected experience.",
+              },
             },
           },
         },
       },
       educationIds: {
         type: "array",
-        maxItems: educationIds.length,
-        items: educationIds.length ? { type: "string", enum: educationIds } : { type: "string" },
+        maxItems: input.candidate.education.length,
+        items: {
+          type: "string",
+          description: "An exact education id from Candidate Profile.",
+        },
       },
     },
   };
