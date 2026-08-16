@@ -157,6 +157,58 @@ test("filter editing and CSV import preview, validation, deduplication, and summ
   await expect(page.getByRole("link", { name: /UI Engineer/ })).toBeVisible();
 });
 
+test("discover, inspect, bulk add, and permanently hide external jobs", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Discover jobs" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "JustJoinIT" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByLabel("Keywords or technologies").fill("React");
+  await expect(page.getByRole("heading", { name: "Search current vacancies" })).toBeVisible();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Search results" })).toBeVisible();
+  await expect(page.getByText("Frontend Platform Engineer", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Frontend Platform Engineer", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByText("Synthetic vacancy used only by isolated end-to-end tests.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.getByRole("button", { name: "Frontend Platform Engineer", exact: true }).click();
+  await page.locator(".discovery-drawer-overlay").click({ position: { x: 10, y: 10 } });
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.getByLabel("Select all displayed jobs").check();
+  await page.getByRole("button", { name: "Add selected (2)" }).click();
+  await expect(page.getByText("Added 2 jobs.")).toBeVisible();
+  await expect(page.getByText("No new jobs found")).toBeVisible();
+
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await expect(page.getByRole("link", { name: /Frontend Platform Engineer/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /UI Engineer/ })).toBeVisible();
+  await page.getByRole("link", { name: /Frontend Platform Engineer/ }).click();
+  await page.getByRole("link", { name: "Edit job" }).click();
+  await page.getByLabel("Private notes").fill("Synthetic discovery edit.");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Job updated.")).toBeVisible();
+  await page.getByRole("link", { name: "Board", exact: true }).click();
+  await expect(page.getByRole("link", { name: /Frontend Platform Engineer/ })).toBeVisible();
+
+  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await page.getByLabel("Keywords or technologies").fill("React");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText("No new jobs found")).toBeVisible();
+  await page.getByLabel("Keywords or technologies").fill("");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Software Engineer", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(page.getByText("Vacancy hidden. It will not appear in future searches.")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText("No new jobs found")).toBeVisible();
+});
+
 test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
   await signIn(page);
   await page.getByRole("link", { name: "Knowledge Base", exact: true }).click();
@@ -205,6 +257,7 @@ test("major screens render cleanly at desktop and narrow widths", async ({ page 
   const screens = [
     ["dashboard", "/dashboard", "Dashboard"],
     ["jobs", "/jobs", "Jobs"],
+    ["discover", "/jobs/discover", "Discover jobs"],
     ["board", "/board", "Board"],
     ["filters", "/filters", "Filters"],
     ["knowledge-base", "/knowledge-base", "Knowledge Base"],
