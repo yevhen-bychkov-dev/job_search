@@ -46,6 +46,9 @@ test("final structured content allows safe senior inference but rejects unsuppor
 
 test("resume templates reject executable content and render escaped data", () => {
   assert.match(validateResumeTemplateText("<html><body><script>bad()</script>{{resume.name}}{{resume.experience}}</body></html>"), /scripts/);
+  const normalMeta = "<html><head><meta name=\"viewport\" content=\"width=device-width\"></head><body>{{resume.name}}{{resume.experience}}</body></html>";
+  assert.equal(validateResumeTemplateText(normalMeta), "");
+  assert.match(validateResumeTemplateText("<html><body>{{NAME}}{{resume.experience}}</body></html>"), /\{\{NAME\}\}/);
   const template = "<html><body><h1>{{resume.name}}</h1><p>{{resume.email}}</p>{{resume.experience}}</body></html>";
   assert.equal(validateResumeTemplateText(template), "");
   const candidate = profile();

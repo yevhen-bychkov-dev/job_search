@@ -45,11 +45,12 @@ function hasBalancedTags(html: string): boolean {
 export function validateResumeTemplateText(value: string): string {
   if (!value.trim()) return "The HTML template is empty.";
   if (new TextEncoder().encode(value).byteLength > MAX_RESUME_TEMPLATE_BYTES) return "HTML templates must be 256 KB or smaller.";
-  if (/<\s*script\b|<\s*iframe\b|<\s*object\b|<\s*embed\b|<\s*base\b|<\s*form\b|<\s*(?:video|audio)\b|<\s*link\b[^>]*\bhref\s*=|<\s*img\b[^>]*\bsrc\s*=|<\s*meta\b[^>]*\bhttp-equiv\s*=|on[a-z]+\s*=|javascript\s*:|data\s*:/i.test(value)) return "Templates cannot contain scripts, event handlers, executable URLs, or embedded objects.";
+  if (/<\s*script\b|<\s*iframe\b|<\s*object\b|<\s*embed\b|<\s*base\b|<\s*form\b|<\s*(?:video|audio)\b|<\s*link\b[^>]*\bhref\s*=|<\s*img\b[^>]*\bsrc\s*=|<\s*meta\b[^>]*\bhttp-equiv\s*=|\bon[a-z]+\s*=|javascript\s*:|data\s*:/i.test(value)) return "Templates cannot contain scripts, event handlers, executable URLs, or embedded objects.";
   if (/@import\b|url\s*\(/i.test(value)) return "Templates cannot import remote styles or assets.";
   if (!hasBalancedTags(value)) return "The HTML template has unbalanced tags.";
   const tokens = [...value.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((match) => match[1].trim());
-  if (!tokens.every((token) => SUPPORTED_TOKENS.has(token))) return "The template contains an unsupported placeholder.";
+  const unsupportedToken = tokens.find((token) => !SUPPORTED_TOKENS.has(token));
+  if (unsupportedToken) return `The template contains unsupported placeholder "{{${unsupportedToken}}}". Use the documented resume.* placeholders.`;
   if (!tokens.includes("resume.name") || !tokens.includes("resume.experience")) return "The template must include {{resume.name}} and {{resume.experience}}.";
   return "";
 }
