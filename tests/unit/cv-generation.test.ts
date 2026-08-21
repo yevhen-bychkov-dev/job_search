@@ -130,7 +130,7 @@ test("Gemini request includes saved-job context and excludes contact PII", () =>
   assert.match(serialized, /application\/json/);
   const generationConfig = request.generationConfig as Record<string, unknown>;
   assert.equal(generationConfig.responseMimeType, "application/json");
-  assert.deepEqual(generationConfig.responseJsonSchema, selectionJsonSchema({
+  assert.deepEqual(generationConfig.responseSchema, selectionJsonSchema({
     job: {
       title: "Frontend Engineer",
       company: "Synthetic Hiring Co",
