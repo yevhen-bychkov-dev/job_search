@@ -1,12 +1,22 @@
 import "server-only";
 
-import { chromium } from "@playwright/test";
+import serverlessChromium from "@sparticuz/chromium";
+import { chromium } from "playwright-core";
 
 export async function renderHtmlToPdf(html: string): Promise<Uint8Array> {
+  const explicitPath = process.env.CHROMIUM_PATH?.trim();
+  const useServerlessChromium = process.env.VERCEL === "1" && !explicitPath;
+  const executablePath = explicitPath
+    || (useServerlessChromium
+      ? await serverlessChromium.executablePath()
+      : chromium.executablePath());
+
   const browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.CHROMIUM_PATH?.trim() || undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    executablePath,
+    args: useServerlessChromium
+      ? serverlessChromium.args
+      : ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
   try {
     const page = await browser.newPage({ viewport: { width: 794, height: 1123 } });
