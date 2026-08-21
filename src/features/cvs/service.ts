@@ -6,6 +6,7 @@ import { ResourceNotFoundError } from "@/lib/data/contracts";
 import { reportUnexpectedError } from "@/lib/server-errors";
 
 import { createCvAiProvider } from "./ai/factory";
+import { CvAiProviderError } from "./ai/provider";
 import { matchVacancyAnalysis, confirmationQuestions, materializeResumeContent, parseVacancyAnalysis } from "./domain";
 import { renderHtmlToPdf } from "./html-to-pdf";
 import { renderResumeTemplate, validateResumeTemplateBytes } from "./template";
@@ -60,7 +61,7 @@ async function requiredInputs(userId: string, jobId: string) {
 
 async function failGeneration(userId: string, generation: ResumeGeneration, error: unknown): Promise<never> {
   const store = getAppStore();
-  const code = error instanceof ResumeGenerationError ? error.code : "RESUME_GENERATION_FAILED";
+  const code = error instanceof ResumeGenerationError || error instanceof CvAiProviderError ? error.code : "RESUME_GENERATION_FAILED";
   try {
     await store.updateResumeGeneration(userId, generation.id, { status: "failed", errorCode: code });
   } catch (updateError) {
@@ -68,6 +69,18 @@ async function failGeneration(userId: string, generation: ResumeGeneration, erro
     reportUnexpectedError("cvs.generation.failure-state", updateError);
   }
   if (error instanceof ResumeGenerationError) throw error;
+  if (error instanceof CvAiProviderError) {
+    const message = error.code === "GEMINI_CONFIG_MISSING"
+      ? "Gemini is not configured for this deployment. Add GEMINI_API_KEY and GEMINI_MODEL."
+      : error.code === "GEMINI_HTTP_401" || error.code === "GEMINI_HTTP_403"
+        ? "Gemini rejected the configured API credentials. Check GEMINI_API_KEY."
+        : error.code === "GEMINI_HTTP_429"
+          ? "Gemini rate limit reached. Please wait and retry."
+          : error.code.startsWith("GEMINI_HTTP_5") || error.code === "GEMINI_NETWORK_FAILURE"
+            ? "Gemini is temporarily unavailable. Please retry."
+            : `Gemini could not produce structured resume content (${error.code}).`;
+    throw new ResumeGenerationError(error.code, message, { cause: error });
+  }
   throw new ResumeGenerationError(code, "Resume generation failed. Please retry.", { cause: error });
 }
 
@@ -94,7 +107,12 @@ async function finalizeResumeGeneration(
     const parsedTemplate = validateResumeTemplateBytes(templateFile.bytes);
     if (!parsedTemplate.ok) throw new ResumeGenerationError("TEMPLATE_INVALID", parsedTemplate.message);
     const renderedHtml = renderResumeTemplate(parsedTemplate.html, { personal: profile.personal, content: content.data });
-    const bytes = await renderHtmlToPdf(renderedHtml);
+    let bytes: Uint8Array;
+    try {
+      bytes = await renderHtmlToPdf(renderedHtml);
+    } catch (error) {
+      throw new ResumeGenerationError("PDF_RENDER_UNAVAILABLE", "The PDF renderer is unavailable in this deployment. Configure a Chromium executable with CHROMIUM_PATH and retry.", { cause: error });
+    }
     if (bytes.byteLength > 2 * 1024 * 1024) throw new ResumeGenerationError("RESUME_PDF_SIZE_LIMIT", "The generated PDF exceeds the private storage limit.");
     const cv = await store.createGeneratedCv(userId, job.id, { bytes, content: content.data, aiProvider: provider.providerId, aiModel: provider.model, generationId: generation.id, templateVersion: template.version });
     const completed = await store.updateResumeGeneration(userId, generation.id, { status: "completed", templateVersion: template.version, errorCode: null });
