@@ -1,6 +1,6 @@
-# Job Search OS
+# Job Search
 
-**Job Search OS** is a personal, production-oriented web application for managing and automating a high-volume job search workflow.
+**Job Search** is a personal, production-oriented web application for managing and automating a high-volume job search workflow.
 
 I started building it to solve a problem I was experiencing myself: job opportunities, application statuses, resumes, notes, and job-board searches were spread across different tools and required too much repetitive manual work.
 
@@ -29,7 +29,7 @@ When applying across multiple job boards, it becomes difficult to answer simple 
 
 **Have I already seen this vacancy? Did I apply? Which CV did I use? Has this company rejected me before? Which opportunities are still active?**
 
-Job Search OS provides one source of truth for that workflow and creates a foundation for progressively automating repetitive parts of the process.
+Job Search provides one source of truth for that workflow and creates a foundation for progressively automating repetitive parts of the process.
 
 The architecture is intentionally modular so that additional job sources and workflow integrations can be added without rebuilding the core application.
 
@@ -89,7 +89,7 @@ Adding another job board requires implementing a new source adapter while the di
 
 ## Security and privacy
 
-Job Search OS stores potentially sensitive information such as resumes and application history, so authorization is enforced at multiple layers.
+Job Search stores potentially sensitive information such as resumes and application history, so authorization is enforced at multiple layers.
 
 Authenticated resources are scoped to a verified user on the server and additionally protected by PostgreSQL Row Level Security.
 
