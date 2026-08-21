@@ -1,5 +1,5 @@
 import type { FilterSettings } from "@/features/filters/types";
-import type { GeneratedCv, GeneratedCvContent } from "@/features/cvs/types";
+import type { GeneratedCv, GeneratedCvContent, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, VacancyAnalysis } from "@/features/cvs/types";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
 import type { KnowledgeDocumentKind, KnowledgeFile } from "@/features/knowledge/types";
@@ -38,6 +38,17 @@ export type StoredKnowledgeDownload =
 
 export type StoredCvDownload = StoredKnowledgeDownload;
 
+export type ResumeTemplate = {
+  id: string;
+  originalName: string;
+  sizeBytes: number;
+  version: number;
+  active: boolean;
+  createdAt: string;
+};
+
+export type StoredResumeTemplate = { bytes: Uint8Array; mimeType: string; filename: string; version: number };
+
 export interface AppStore {
   listJobs(userId: string, query?: JobQuery): Promise<Job[]>;
   getJob(userId: string, id: string): Promise<Job | null>;
@@ -70,11 +81,21 @@ export interface AppStore {
   downloadKnowledgeFile(userId: string, id: string): Promise<StoredKnowledgeDownload>;
   deleteKnowledgeFile(userId: string, id: string): Promise<void>;
   getCandidateProfile(userId: string): Promise<CandidateProfile | null>;
+  listResumeTemplates(userId: string): Promise<ResumeTemplate[]>;
+  getActiveResumeTemplate(userId: string): Promise<ResumeTemplate | null>;
+  uploadResumeTemplate(userId: string, file: { filename: string; mimeType: string; bytes: Uint8Array }): Promise<ResumeTemplate>;
+  downloadResumeTemplate(userId: string, id: string): Promise<StoredResumeTemplate>;
+  listResumeConfirmations(userId: string): Promise<ResumeConfirmation[]>;
+  saveResumeConfirmation(userId: string, confirmation: ResumeConfirmation): Promise<ResumeConfirmation>;
+  createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration>;
+  getResumeGeneration(userId: string, id: string): Promise<ResumeGeneration | null>;
+  getLatestResumeGeneration(userId: string, jobId: string): Promise<ResumeGeneration | null>;
+  updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; confirmations?: ResumeConfirmation[]; errorCode?: string | null; templateVersion?: number | null }): Promise<ResumeGeneration>;
   listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]>;
   createGeneratedCv(
     userId: string,
     jobId: string,
-    input: { bytes: Uint8Array; content: GeneratedCvContent; aiProvider: string; aiModel: string },
+    input: { bytes: Uint8Array; content: GeneratedCvContent; aiProvider: string; aiModel: string; generationId?: string | null; templateVersion?: number | null },
   ): Promise<GeneratedCv>;
   downloadGeneratedCv(
     userId: string,

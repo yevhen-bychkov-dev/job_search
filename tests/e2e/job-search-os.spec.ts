@@ -276,6 +276,14 @@ test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
 
 test("generate immutable CV versions from the verified Candidate Profile", async ({ page }) => {
   await signIn(page);
+  await page.getByRole("link", { name: "Account", exact: true }).click();
+  await page.getByLabel("Import HTML resume template").setInputFiles({
+    name: "synthetic-template.html",
+    mimeType: "text/html",
+    buffer: Buffer.from(`<!doctype html><html><head><style>@page{size:A4;margin:18mm}body{font-family:Arial;color:#182230}h1{margin-bottom:0}.resume-experience-item{break-inside:avoid}</style></head><body><header><h1>{{resume.name}}</h1><p>{{resume.headline}}</p><p>{{resume.location}} · {{resume.email}} · {{resume.phone}}</p><p>{{resume.links}}</p></header><section><h2>Summary</h2><p>{{resume.summary}}</p></section><section><h2>Skills</h2>{{resume.skills}}</section><section><h2>Experience</h2>{{resume.experience}}</section><section><h2>Education</h2>{{resume.education}}</section></body></html>`),
+  });
+  await page.getByRole("button", { name: "Save template" }).click();
+  await expect(page.getByText(/Active template: synthetic-template.html/)).toBeVisible();
   await page.getByRole("link", { name: "Knowledge Base", exact: true }).click();
   await page.getByLabel("Document type").selectOption("candidate_profile");
   const candidateProfile = {
@@ -318,19 +326,22 @@ test("generate immutable CV versions from the verified Candidate Profile", async
   await page.getByRole("link", { name: "Add job" }).first().click();
   await page.getByLabel("Job title").fill("Accessible Frontend Engineer");
   await page.getByLabel("Company").fill("Synthetic Hiring Co");
-  await page.getByLabel("Technologies").fill("React, TypeScript");
+  await page.getByLabel("Technologies").fill("React, TypeScript, GraphQL");
   await page.getByLabel("Description").fill("Build accessible React interfaces with TypeScript.");
   await page.getByRole("button", { name: "Create job" }).click();
 
   await expect(page.getByRole("heading", { name: "CVs" })).toBeVisible();
   const ownedJobUrl = new URL(page.url()).pathname;
   await expect(page.getByText("No CVs generated for this job yet.")).toBeVisible();
-  await page.getByRole("button", { name: "Generate CV" }).click();
-  await expect(page.getByRole("button", { name: "Generating CV…" })).toBeDisabled();
-  await expect(page.getByText("CV #1 generated.")).toBeVisible();
+  await page.getByRole("button", { name: "Generate Resume", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Analyzing vacancy…" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "Confirm important vacancy requirements" })).toBeVisible();
+  await page.locator("fieldset").filter({ hasText: "GraphQL" }).getByLabel("Commercial experience").check();
+  await page.getByRole("button", { name: "Confirm and generate resume" }).click();
+  await expect(page.getByText("Resume #1 generated.")).toBeVisible();
   for (let version = 2; version <= 5; version += 1) {
-    await page.getByRole("button", { name: "Generate CV" }).click();
-    await expect(page.getByText(`CV #${version} generated.`)).toBeVisible();
+    await page.getByRole("button", { name: "Generate Resume", exact: true }).click();
+    await expect(page.getByText(`Resume #${version} generated.`)).toBeVisible();
   }
   await expect(page.locator(".cv-list strong")).toHaveText(["CV #5", "CV #4", "CV #3", "CV #2", "CV #1"]);
   await expect(page.getByRole("link", { name: "Preview" })).toHaveCount(5);

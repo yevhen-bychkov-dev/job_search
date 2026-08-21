@@ -3,7 +3,7 @@ import "server-only";
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
 import { nextCvVersion } from "@/features/cvs/domain";
-import type { GeneratedCv } from "@/features/cvs/types";
+import type { GeneratedCv, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import { parseCandidateProfileBytes, type CandidateProfile } from "@/features/knowledge/candidate-profile";
@@ -14,7 +14,9 @@ import {
   ConcurrentModificationError,
   DuplicateJobError,
   ResourceNotFoundError,
+  type ResumeTemplate,
   type StoredKnowledgeDownload,
+  type StoredResumeTemplate,
 } from "./contracts";
 
 type StoredKnowledgeFile = KnowledgeFile & {
@@ -27,12 +29,18 @@ type StoredGeneratedCv = GeneratedCv & {
   bytes: Uint8Array;
 };
 
+type StoredTemplate = ResumeTemplate & { userId: string; mimeType: string; bytes: Uint8Array };
+type StoredGeneration = ResumeGeneration & { userId: string };
+
 type MemoryState = {
   jobs: Array<Job & { userId: string; duplicateKey: string }>;
   history: Array<JobStatusHistory & { userId: string }>;
   filters: Map<string, FilterSettings>;
   files: StoredKnowledgeFile[];
   generatedCvs: StoredGeneratedCv[];
+  templates: StoredTemplate[];
+  generations: StoredGeneration[];
+  confirmations: Array<ResumeConfirmation & { userId: string }>;
   ignoredExternalJobs: Array<{ userId: string; source: string; externalJobId: string }>;
 };
 
@@ -41,7 +49,7 @@ declare global {
 }
 
 function initialState(): MemoryState {
-  return { jobs: [], history: [], filters: new Map(), files: [], generatedCvs: [], ignoredExternalJobs: [] };
+  return { jobs: [], history: [], filters: new Map(), files: [], generatedCvs: [], templates: [], generations: [], confirmations: [], ignoredExternalJobs: [] };
 }
 
 function state(): MemoryState {
@@ -106,8 +114,18 @@ function publicGeneratedCv(record: StoredGeneratedCv): GeneratedCv {
     content: structuredClone(record.content),
     aiProvider: record.aiProvider,
     aiModel: record.aiModel,
+    generationId: record.generationId,
+    templateVersion: record.templateVersion,
     createdAt: record.createdAt,
   };
+}
+
+function publicTemplate(record: StoredTemplate): ResumeTemplate {
+  return { id: record.id, originalName: record.originalName, sizeBytes: record.sizeBytes, version: record.version, active: record.active, createdAt: record.createdAt };
+}
+
+function publicGeneration(record: StoredGeneration): ResumeGeneration {
+  return { id: record.id, jobId: record.jobId, status: record.status, idempotencyKey: record.idempotencyKey, analysis: structuredClone(record.analysis), confirmations: structuredClone(record.confirmations), errorCode: record.errorCode, templateVersion: record.templateVersion, createdAt: record.createdAt, updatedAt: record.updatedAt };
 }
 
 export class MemoryAppStore implements AppStore {
@@ -360,6 +378,67 @@ export class MemoryAppStore implements AppStore {
     return parsed.data;
   }
 
+  async listResumeTemplates(userId: string): Promise<ResumeTemplate[]> {
+    return state().templates.filter((template) => template.userId === userId).sort((left, right) => right.version - left.version).map(publicTemplate);
+  }
+
+  async getActiveResumeTemplate(userId: string): Promise<ResumeTemplate | null> {
+    const template = state().templates.find((candidate) => candidate.userId === userId && candidate.active);
+    return template ? publicTemplate(template) : null;
+  }
+
+  async uploadResumeTemplate(userId: string, file: { filename: string; mimeType: string; bytes: Uint8Array }): Promise<ResumeTemplate> {
+    const userTemplates = state().templates.filter((template) => template.userId === userId);
+    for (const template of userTemplates) template.active = false;
+    const stored: StoredTemplate = { id: crypto.randomUUID(), userId, originalName: file.filename, mimeType: file.mimeType, sizeBytes: file.bytes.byteLength, version: Math.max(0, ...userTemplates.map((template) => template.version)) + 1, active: true, createdAt: new Date().toISOString(), bytes: file.bytes };
+    state().templates.push(stored);
+    return publicTemplate(stored);
+  }
+
+  async downloadResumeTemplate(userId: string, id: string): Promise<StoredResumeTemplate> {
+    const template = state().templates.find((candidate) => candidate.userId === userId && candidate.id === id);
+    if (!template) throw new ResourceNotFoundError("Resume template");
+    return { bytes: template.bytes, mimeType: template.mimeType, filename: template.originalName, version: template.version };
+  }
+
+  async listResumeConfirmations(userId: string): Promise<ResumeConfirmation[]> {
+    return state().confirmations.filter((confirmation) => confirmation.userId === userId).map((confirmation) => ({ key: confirmation.key, label: confirmation.label, level: confirmation.level, provenance: confirmation.provenance }));
+  }
+
+  async saveResumeConfirmation(userId: string, confirmation: ResumeConfirmation): Promise<ResumeConfirmation> {
+    const existing = state().confirmations.find((candidate) => candidate.userId === userId && candidate.key === confirmation.key);
+    if (existing) Object.assign(existing, structuredClone(confirmation));
+    else state().confirmations.push({ userId, ...structuredClone(confirmation) });
+    return structuredClone(confirmation);
+  }
+
+  async createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration> {
+    if (!state().jobs.some((job) => job.userId === userId && job.id === jobId)) throw new ResourceNotFoundError("Job");
+    const existing = state().generations.find((generation) => generation.userId === userId && generation.jobId === jobId && generation.idempotencyKey === idempotencyKey);
+    if (existing) return publicGeneration(existing);
+    const now = new Date().toISOString();
+    const stored: StoredGeneration = { id: crypto.randomUUID(), userId, jobId, idempotencyKey, status: "analyzing", analysis: null, confirmations: [], errorCode: null, templateVersion: null, createdAt: now, updatedAt: now };
+    state().generations.push(stored);
+    return publicGeneration(stored);
+  }
+
+  async getResumeGeneration(userId: string, id: string): Promise<ResumeGeneration | null> {
+    const generation = state().generations.find((candidate) => candidate.userId === userId && candidate.id === id);
+    return generation ? publicGeneration(generation) : null;
+  }
+
+  async getLatestResumeGeneration(userId: string, jobId: string): Promise<ResumeGeneration | null> {
+    const generation = state().generations.filter((candidate) => candidate.userId === userId && candidate.jobId === jobId).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    return generation ? publicGeneration(generation) : null;
+  }
+
+  async updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; confirmations?: ResumeConfirmation[]; errorCode?: string | null; templateVersion?: number | null }): Promise<ResumeGeneration> {
+    const generation = state().generations.find((candidate) => candidate.userId === userId && candidate.id === id);
+    if (!generation) throw new ResourceNotFoundError("Resume generation");
+    Object.assign(generation, input, { updatedAt: new Date(Math.max(Date.now(), new Date(generation.updatedAt).getTime() + 1)).toISOString() });
+    return publicGeneration(generation);
+  }
+
   async listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]> {
     return state().generatedCvs
       .filter((cv) => cv.userId === userId && cv.jobId === jobId)
@@ -370,10 +449,14 @@ export class MemoryAppStore implements AppStore {
   async createGeneratedCv(
     userId: string,
     jobId: string,
-    input: { bytes: Uint8Array; content: GeneratedCv["content"]; aiProvider: string; aiModel: string },
+    input: { bytes: Uint8Array; content: GeneratedCv["content"]; aiProvider: string; aiModel: string; generationId?: string | null; templateVersion?: number | null },
   ): Promise<GeneratedCv> {
     if (!state().jobs.some((job) => job.userId === userId && job.id === jobId)) {
       throw new ResourceNotFoundError("Job");
+    }
+    if (input.generationId) {
+      const committed = state().generatedCvs.find((cv) => cv.userId === userId && cv.jobId === jobId && cv.generationId === input.generationId);
+      if (committed) return publicGeneratedCv(committed);
     }
     const version = nextCvVersion(
       state().generatedCvs.filter((cv) => cv.jobId === jobId).map((cv) => cv.version),
@@ -386,6 +469,8 @@ export class MemoryAppStore implements AppStore {
       content: structuredClone(input.content),
       aiProvider: input.aiProvider,
       aiModel: input.aiModel,
+      generationId: input.generationId ?? null,
+      templateVersion: input.templateVersion ?? null,
       createdAt: new Date().toISOString(),
       bytes: input.bytes,
     };

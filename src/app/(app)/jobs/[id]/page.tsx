@@ -20,11 +20,13 @@ export default async function JobDetailPage({ params, searchParams }: PageProps<
   const { id } = await params;
   if (!isUuid(id)) notFound();
   const store = getAppStore();
-  const [job, history, cvs, candidateProfile] = await Promise.all([
+  const [job, history, cvs, candidateProfile, resumeTemplate, latestGeneration] = await Promise.all([
     store.getJob(identity.userId, id),
     store.listStatusHistory(identity.userId, id),
     store.listGeneratedCvs(identity.userId, id),
     store.getCandidateProfile(identity.userId),
+    store.getActiveResumeTemplate(identity.userId),
+    store.getLatestResumeGeneration(identity.userId, id),
   ]);
   if (!job) notFound();
   const query = await searchParams;
@@ -56,7 +58,7 @@ export default async function JobDetailPage({ params, searchParams }: PageProps<
           <article className="card stack"><h2>Status</h2><StatusForm id={job.id} status={job.status} /></article>
           <article className="card stack"><h2>Description</h2><div className="rich-copy">{job.description || "No description saved."}</div></article>
           <article className="card stack"><h2>Private notes</h2><div className="rich-copy">{job.notes || "No notes saved."}</div></article>
-          <CvSection jobId={job.id} cvs={cvs} hasCandidateProfile={Boolean(candidateProfile)} />
+          <CvSection jobId={job.id} cvs={cvs} hasCandidateProfile={Boolean(candidateProfile)} hasResumeTemplate={Boolean(resumeTemplate)} latestGeneration={latestGeneration} />
           <article className="card stack"><h2>Status history</h2>{history.length ? <ol className="timeline">{history.map((event) => <li key={event.id}><span className="timeline-dot" /><div><strong>{event.fromStatus ? `${JOB_STATUS_LABELS[event.fromStatus]} → ${JOB_STATUS_LABELS[event.toStatus]}` : `Added as ${JOB_STATUS_LABELS[event.toStatus]}`}</strong><time dateTime={event.changedAt}>{formatDateTimeInTimeZone(event.changedAt)}</time></div></li>)}</ol> : <p className="muted">No recorded changes.</p>}</article>
         </div>
         <aside className="detail-aside stack">

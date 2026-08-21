@@ -50,8 +50,9 @@ flowchart LR
     Sources --> JJ["JustJoinIT"]
     Sources -.-> Future["Additional job sources"]
 
-    CV --> Gemini["Gemini structured selection"]
-    CV --> PDF["Deterministic PDF renderer"]
+    CV --> Gemini["Gemini analysis + ResumeContent"]
+    CV --> Template["Validated user HTML template"]
+    Template --> PDF["Chromium A4 PDF renderer"]
     PDF --> Storage
 ```
 
@@ -63,17 +64,17 @@ External job boards are isolated behind a common adapter boundary, allowing addi
 
 ## AI-assisted CV generation
 
-The CV generation flow is intentionally designed to reduce hallucinations.
+The resume generation flow is intentionally designed to reduce hallucinations while producing strong professional framing.
 
-Instead of asking an LLM to freely rewrite a resume, the application maintains a validated **Candidate Profile** as the source of truth.
+The application maintains a validated **Candidate Profile** as the factual source of truth, then runs a durable Vacancy → Requirement Analysis → Knowledge Base Matching → User Confirmation → ResumeContent → HTML Template → PDF workflow.
 
-Before the AI request, personal contact information is removed. Gemini receives structured career data and selects relevant existing facts and skills for the target vacancy.
+Before either AI request, personal contact information is removed. Gemini first analyzes the vacancy and then returns structured ResumeContent. Each final bullet cites source achievement IDs, so the server can allow safe senior inference such as framing a verified end-to-end build as designed and implemented while rejecting unsupported leadership, metrics, or impact claims. Missing evidence is unconfirmed, not “no experience”; only material unknowns are shown for confirmation.
 
-The application then validates those selections against the original profile and generates the final PDF locally.
+The application validates the structured content against the original profile, inserts it into the user's validated HTML template, and generates the PDF with Chromium. Personal contact details are injected during trusted template rendering.
 
 This means the model does not control contact details, arbitrary work history, HTML, CSS, or the final PDF layout.
 
-Each generated CV is stored as an immutable version associated with the corresponding job.
+Each completed resume is stored as an immutable version associated with the corresponding job. Incomplete and failed generation attempts remain lifecycle records and never appear in normal resume history.
 
 ## Job discovery
 
@@ -141,6 +142,14 @@ npm run dev
 ```
 
 Configure the required Supabase environment values and Gemini API key in `.env.local`.
+
+To test the application locally without Supabase, Docker, external credentials, or real data, run:
+
+```bash
+npm run dev:memory
+```
+
+Open `http://localhost:3000/login` and sign in with `demo.user@example.test` / `DemoPass!123`. This uses the isolated in-memory adapter and synthetic AI provider used by the E2E suite. It is for local development only; never enable `PLAYWRIGHT_TEST_MODE` in Vercel or a shared environment.
 
 Apply the database migrations before using the production Supabase-backed data layer.
 

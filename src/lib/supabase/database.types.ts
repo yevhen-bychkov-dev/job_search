@@ -16,8 +16,10 @@ export type Database = {
           content_json: Json;
           created_at: string;
           file_path: string;
+          generation_id: string | null;
           id: string;
           job_id: string;
+          template_version: number | null;
           user_id: string;
           version: number;
         };
@@ -27,8 +29,10 @@ export type Database = {
           content_json: Json;
           created_at?: string;
           file_path: string;
+          generation_id?: string | null;
           id?: string;
           job_id: string;
+          template_version?: number | null;
           user_id: string;
           version: number;
         };
@@ -38,8 +42,10 @@ export type Database = {
           content_json?: Json;
           created_at?: string;
           file_path?: string;
+          generation_id?: string | null;
           id?: string;
           job_id?: string;
+          template_version?: number | null;
           user_id?: string;
           version?: number;
         };
@@ -195,6 +201,108 @@ export type Database = {
         };
         Relationships: [];
       };
+      resume_confirmations: {
+        Row: {
+          label: string;
+          level: Database["public"]["Enums"]["resume_confirmation_level"];
+          provenance: string;
+          requirement_key: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          label: string;
+          level: Database["public"]["Enums"]["resume_confirmation_level"];
+          provenance: string;
+          requirement_key: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          label?: string;
+          level?: Database["public"]["Enums"]["resume_confirmation_level"];
+          provenance?: string;
+          requirement_key?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      resume_generations: {
+        Row: {
+          analysis_json: Json | null;
+          confirmations_json: Json;
+          created_at: string;
+          error_code: string | null;
+          id: string;
+          idempotency_key: string;
+          job_id: string;
+          status: Database["public"]["Enums"]["resume_generation_status"];
+          template_version: number | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          analysis_json?: Json | null;
+          confirmations_json?: Json;
+          created_at?: string;
+          error_code?: string | null;
+          id?: string;
+          idempotency_key: string;
+          job_id: string;
+          status?: Database["public"]["Enums"]["resume_generation_status"];
+          template_version?: number | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          analysis_json?: Json | null;
+          confirmations_json?: Json;
+          created_at?: string;
+          error_code?: string | null;
+          id?: string;
+          idempotency_key?: string;
+          job_id?: string;
+          status?: Database["public"]["Enums"]["resume_generation_status"];
+          template_version?: number | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      resume_templates: {
+        Row: {
+          active: boolean;
+          created_at: string;
+          id: string;
+          object_path: string;
+          original_name: string;
+          size_bytes: number;
+          user_id: string;
+          version: number;
+        };
+        Insert: {
+          active?: boolean;
+          created_at?: string;
+          id?: string;
+          object_path: string;
+          original_name: string;
+          size_bytes: number;
+          user_id: string;
+          version: number;
+        };
+        Update: {
+          active?: boolean;
+          created_at?: string;
+          id?: string;
+          object_path?: string;
+          original_name?: string;
+          size_bytes?: number;
+          user_id?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
       user_filters: {
         Row: {
           excluded_technologies: string[];
@@ -240,6 +348,15 @@ export type Database = {
         | "rejected"
         | "withdrawn";
       knowledge_document_kind: "reference" | "candidate_profile";
+      resume_confirmation_level: "commercial" | "familiar" | "none";
+      resume_generation_status:
+        | "analyzing"
+        | "awaiting_confirmation"
+        | "generating"
+        | "rendering"
+        | "completed"
+        | "failed"
+        | "cancelled";
       work_mode: "remote" | "hybrid" | "onsite" | "unspecified";
     };
     CompositeTypes: Record<string, never>;

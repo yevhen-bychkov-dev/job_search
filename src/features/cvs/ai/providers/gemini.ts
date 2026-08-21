@@ -1,8 +1,8 @@
 import "server-only";
 
-import type { CvAiProvider, GenerateCvInput } from "../provider.ts";
+import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput } from "../provider.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse } from "../provider.ts";
-import { buildGeminiCvRequest } from "../gemini-request.ts";
+import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
 
 export class GeminiCvProvider implements CvAiProvider {
   readonly providerId = "gemini";
@@ -20,7 +20,7 @@ export class GeminiCvProvider implements CvAiProvider {
     this.fetchImplementation = fetchImplementation;
   }
 
-  async generateCv(input: GenerateCvInput): Promise<unknown> {
+  private async request(body: Record<string, unknown>): Promise<unknown> {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
     let response: Response;
     try {
@@ -30,7 +30,7 @@ export class GeminiCvProvider implements CvAiProvider {
           "content-type": "application/json",
           "x-goog-api-key": this.apiKey,
         },
-        body: JSON.stringify(buildGeminiCvRequest(input)),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(60_000),
       });
     } catch (error) {
@@ -38,5 +38,13 @@ export class GeminiCvProvider implements CvAiProvider {
     }
     if (!response.ok) throw new CvAiProviderError(`GEMINI_HTTP_${response.status}`, `Gemini request failed with HTTP ${response.status}.`);
     return extractGeminiStructuredResponse(await response.json() as unknown);
+  }
+
+  async analyzeVacancy(input: AnalyzeVacancyInput): Promise<unknown> {
+    return this.request(buildGeminiAnalysisRequest(input));
+  }
+
+  async generateCv(input: GenerateCvInput): Promise<unknown> {
+    return this.request(buildGeminiResumeRequest(input));
   }
 }

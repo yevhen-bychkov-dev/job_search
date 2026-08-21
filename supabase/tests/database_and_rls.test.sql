@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(83);
+select plan(101);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -291,6 +291,41 @@ select throws_ok(
 );
 select is((with removed as (delete from public.ignored_external_jobs returning *) select count(*) from removed), 1::bigint, 'user A can delete the owned ignored identity');
 
+select lives_ok(
+  $$insert into public.resume_templates (id, user_id, object_path, original_name, size_bytes, version, active)
+    values ('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.html', 'resume.html', 1200, 1, true)$$,
+  'user A can create an owned resume template'
+);
+select is((select count(*) from public.resume_templates), 1::bigint, 'user A can read the active resume template');
+select lives_ok(
+  $$insert into public.resume_confirmations (user_id, requirement_key, label, level, provenance)
+    values ('11111111-1111-4111-8111-111111111111', 'graphql', 'GraphQL', 'familiar', 'explicit_user_confirmation')$$,
+  'user A can save an explicit resume confirmation'
+);
+select is((select count(*) from public.resume_confirmations), 1::bigint, 'user A can read resume confirmations');
+select lives_ok(
+  $$insert into public.resume_generations (id, user_id, job_id, status, idempotency_key, analysis_json, confirmations_json, template_version)
+    values ('ffffffff-ffff-4fff-8fff-ffffffffffff', '11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'analyzing', 'synthetic-idempotency-1', '{}'::jsonb, '[]'::jsonb, 1)$$,
+  'user A can create an owned resume generation'
+);
+select is((select count(*) from public.resume_generations), 1::bigint, 'user A can read resume generation state');
+select is((with changed as (update public.resume_generations set status = 'awaiting_confirmation' returning *) select count(*) from changed), 1::bigint, 'user A can advance owned resume generation state');
+
+set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
+select is((select count(*) from public.resume_templates), 0::bigint, 'user B cannot read user A templates');
+select is((select count(*) from public.resume_confirmations), 0::bigint, 'user B cannot read user A confirmations');
+select is((select count(*) from public.resume_generations), 0::bigint, 'user B cannot read user A generation state');
+select throws_ok(
+  $$insert into public.resume_templates (user_id, object_path, original_name, size_bytes, version, active)
+    values ('11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111/stolen.html', 'stolen.html', 100, 2, true)$$,
+  '42501', null, 'user B cannot create a template for user A'
+);
+select throws_ok(
+  $$insert into public.resume_generations (user_id, job_id, idempotency_key)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'stolen-generation-key')$$,
+  '42501', null, 'user B cannot create a generation for user A'
+);
+
 set local role anon;
 set local request.jwt.claim.sub = '';
 select is((select count(*) from public.jobs), 0::bigint, 'anonymous users cannot read jobs');
@@ -299,6 +334,9 @@ select is((select count(*) from public.user_filters), 0::bigint, 'anonymous user
 select is((select count(*) from public.knowledge_files), 0::bigint, 'anonymous users cannot read file metadata');
 select is((select count(*) from public.ignored_external_jobs), 0::bigint, 'anonymous users cannot read ignored identities');
 select is((select count(*) from public.generated_cvs), 0::bigint, 'anonymous users cannot read generated CVs');
+select is((select count(*) from public.resume_templates), 0::bigint, 'anonymous users cannot read resume templates');
+select is((select count(*) from public.resume_confirmations), 0::bigint, 'anonymous users cannot read resume confirmations');
+select is((select count(*) from public.resume_generations), 0::bigint, 'anonymous users cannot read resume generations');
 select throws_ok(
   $$insert into public.jobs (user_id, title, company, discovered_on, dedupe_key)
     values ('11111111-1111-4111-8111-111111111111', 'Anonymous Job', 'Synthetic Labs', '2026-08-01', 'fallback:anonymous')$$,
@@ -340,6 +378,21 @@ select throws_ok(
   '42501',
   null,
   'anonymous users cannot create generated CV metadata'
+);
+select throws_ok(
+  $$insert into public.resume_templates (user_id, object_path, original_name, size_bytes, version, active)
+    values ('11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111/anonymous.html', 'anonymous.html', 100, 2, true)$$,
+  '42501', null, 'anonymous users cannot create resume templates'
+);
+select throws_ok(
+  $$insert into public.resume_confirmations (user_id, requirement_key, label, level, provenance)
+    values ('11111111-1111-4111-8111-111111111111', 'anonymous', 'Anonymous', 'none', 'explicit_user_confirmation')$$,
+  '42501', null, 'anonymous users cannot create resume confirmations'
+);
+select throws_ok(
+  $$insert into public.resume_generations (user_id, job_id, idempotency_key)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'anonymous-generation-key')$$,
+  '42501', null, 'anonymous users cannot create resume generations'
 );
 
 set local role authenticated;
