@@ -176,7 +176,6 @@ supabase/migrations         database schema and policies
 supabase/tests              database and RLS tests
 tests/unit                  domain tests
 tests/e2e                   browser workflows
-<!-- docs                        architecture, specifications and validation -->
 ```
 
 ## Current direction
