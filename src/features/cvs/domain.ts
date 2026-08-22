@@ -220,18 +220,29 @@ function normalized(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
+function stableRequirementKey(label: string): string {
+  return label
+    .normalize("NFKC")
+    .toLocaleLowerCase("en")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+}
+
 function parseRequirement(value: unknown): ParseResult<VacancyRequirement> {
   if (!isRecord(value) || !hasOnlyKeys(value, ["key", "label", "category", "importance", "status", "evidence"])) {
     return { ok: false, message: "Vacancy requirement is invalid." };
   }
-  if (typeof value.key !== "string" || !/^[a-z0-9-]{1,120}$/.test(value.key)) return { ok: false, message: "Vacancy requirement key is invalid." };
+  if (typeof value.key !== "string") return { ok: false, message: "Vacancy requirement key is invalid." };
   if (typeof value.label !== "string" || value.label.length < 1 || value.label.length > 160) return { ok: false, message: "Vacancy requirement label is invalid." };
+  const key = stableRequirementKey(value.label);
+  if (!/^[a-z0-9-]{1,120}$/.test(key)) return { ok: false, message: "Vacancy requirement label cannot produce a valid key." };
   if (typeof value.category !== "string" || !REQUIREMENT_CATEGORIES.includes(value.category as VacancyRequirement["category"])) return { ok: false, message: "Vacancy requirement category is invalid." };
   if (value.importance !== "must_have" && value.importance !== "nice_to_have") return { ok: false, message: "Vacancy requirement importance is invalid." };
   if (value.status !== "supported" && value.status !== "unconfirmed") return { ok: false, message: "Vacancy requirement status is invalid." };
   const evidenceValues = value.evidence;
   if (!Array.isArray(evidenceValues) || evidenceValues.length > 10 || !evidenceValues.every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= 240)) return { ok: false, message: "requirement evidence is invalid." };
-  return { ok: true, data: { key: value.key, label: value.label, category: value.category as VacancyRequirement["category"], importance: value.importance, status: value.status, evidence: evidenceValues as string[] } };
+  return { ok: true, data: { key, label: value.label, category: value.category as VacancyRequirement["category"], importance: value.importance, status: value.status, evidence: evidenceValues as string[] } };
 }
 
 function parseRequirementList(value: unknown, field: string): ParseResult<VacancyRequirement[]> {

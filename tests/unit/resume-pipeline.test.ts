@@ -22,6 +22,16 @@ test("vacancy analysis is strict and absence remains unconfirmed", () => {
   assert.deepEqual(confirmationQuestions(matched).map((question) => question.label), ["GraphQL"]);
 });
 
+test("vacancy requirement keys are stabilized from labels", () => {
+  const parsed = parseVacancyAnalysis({
+    mustHaveTechnical: [{ key: "_1_requirement-dotnet-backend", label: ".NET backend", category: "technical", importance: "must_have", status: "unconfirmed", evidence: [] }],
+    niceToHaveTechnical: [], tooling: [], architecture: [], domainKnowledge: [], responsibilities: [], ownershipExpectations: [],
+    senioritySignals: [], collaborationExpectations: [], leadershipExpectations: [], atsKeywords: [], employerTerminology: [],
+  });
+  if (!parsed.ok) assert.fail(parsed.message);
+  assert.equal(parsed.data.mustHaveTechnical[0].key, "net-backend");
+});
+
 test("commercial confirmation changes matching, while familiar does not", () => {
   const analysis = deterministicAnalysis({ job: { title: "Frontend Engineer", company: "Synthetic Co", description: "", technologies: ["GraphQL"] }, candidate: candidateProfileForAi(profile()), confirmations: [] });
   const parsed = parseVacancyAnalysis(analysis);
