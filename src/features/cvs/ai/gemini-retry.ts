@@ -12,12 +12,19 @@ export function isRetryableGeminiStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
-function retryDelay(response: Response, retryIndex: number, random: () => number): number {
+function retryAfterDelay(response: Response): number | null {
   const retryAfter = response.headers.get("retry-after");
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS);
-  }
+  if (!retryAfter) return null;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS);
+  const timestamp = Date.parse(retryAfter);
+  return Number.isFinite(timestamp) ? Math.min(Math.max(0, timestamp - Date.now()), MAX_RETRY_AFTER_MS) : null;
+}
+
+function retryDelay(response: Response, retryIndex: number, random: () => number): number | null {
+  const retryAfter = retryAfterDelay(response);
+  if (retryAfter !== null) return retryAfter;
+  if (response.status === 429) return null;
   const exponentialDelay = BASE_DELAY_MS * (2 ** retryIndex);
   const jitterMultiplier = 0.75 + (random() * 0.5);
   return Math.round(exponentialDelay * jitterMultiplier);
@@ -38,6 +45,7 @@ export async function fetchGeminiWithRetry(
       const response = await fetchImplementation(endpoint, init());
       if (response.ok || !isRetryableGeminiStatus(response.status) || attempt === MAX_ATTEMPTS - 1) return response;
       const delay = retryDelay(response, attempt, random);
+      if (delay === null) return response;
       await response.body?.cancel().catch(() => undefined);
       await waitImplementation(delay);
     } catch (error) {

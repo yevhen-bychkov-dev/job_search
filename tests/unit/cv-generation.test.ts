@@ -149,6 +149,15 @@ test("Gemini retries transient HTTP failures and not permanent request errors", 
   );
   assert.equal(permanent.status, 400);
   assert.equal(permanentAttempts, 1);
+
+  let rateLimitAttempts = 0;
+  const rateLimited = await fetchGeminiWithRetry(
+    async () => { rateLimitAttempts += 1; return new Response("{}", { status: 429 }); },
+    "https://example.test/gemini",
+    () => ({ method: "POST" }),
+  );
+  assert.equal(rateLimited.status, 429);
+  assert.equal(rateLimitAttempts, 1);
 });
 
 test("Gemini falls back only after persistent primary-model 503 responses", async () => {

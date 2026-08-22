@@ -76,7 +76,7 @@ async function failGeneration(userId: string, generation: ResumeGeneration, erro
       : error.code === "GEMINI_HTTP_401" || error.code === "GEMINI_HTTP_403"
         ? "Gemini rejected the configured API credentials. Check GEMINI_API_KEY."
         : error.code === "GEMINI_HTTP_429"
-          ? "Gemini rate limit reached after automatic retries (GEMINI_HTTP_429). Please wait and retry."
+          ? "Gemini rate limit reached (GEMINI_HTTP_429). Automatic retries were stopped to avoid increasing the limit. Please wait and retry."
           : error.code.startsWith("GEMINI_HTTP_5")
             ? `Gemini is temporarily unavailable after automatic retries (${error.code}). Please retry.`
             : error.code === "GEMINI_TIMEOUT"

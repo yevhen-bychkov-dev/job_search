@@ -336,6 +336,10 @@ test("generate immutable CV versions from the verified Candidate Profile", async
   await page.getByRole("button", { name: "Generate Resume", exact: true }).click();
   await expect(page.getByRole("button", { name: "Analyzing vacancy…" })).toBeDisabled();
   await expect(page.getByRole("heading", { name: "Confirm important vacancy requirements" })).toBeVisible();
+  await page.getByRole("button", { name: "Close requirement confirmation" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm important vacancy requirements" })).toBeHidden();
+  await page.getByRole("button", { name: "Generate Resume", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Confirm important vacancy requirements" })).toBeVisible();
   await page.locator("fieldset").filter({ hasText: "GraphQL" }).getByLabel("Commercial experience").check();
   await page.getByRole("button", { name: "Confirm and generate resume" }).click();
   await expect(page.getByText("Resume #1 generated.")).toBeVisible();
