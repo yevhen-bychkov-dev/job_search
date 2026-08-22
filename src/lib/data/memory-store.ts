@@ -3,7 +3,7 @@ import "server-only";
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
 import { nextCvVersion } from "@/features/cvs/domain";
-import type { GeneratedCv, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
+import type { GeneratedCv, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import { parseCandidateProfileBytes, type CandidateProfile } from "@/features/knowledge/candidate-profile";
@@ -127,7 +127,7 @@ function publicTemplate(record: StoredTemplate): ResumeTemplate {
 }
 
 function publicGeneration(record: StoredGeneration): ResumeGeneration {
-  return { id: record.id, jobId: record.jobId, status: record.status, idempotencyKey: record.idempotencyKey, analysis: structuredClone(record.analysis), confirmations: structuredClone(record.confirmations), errorCode: record.errorCode, templateVersion: record.templateVersion, createdAt: record.createdAt, updatedAt: record.updatedAt };
+  return { id: record.id, jobId: record.jobId, status: record.status, idempotencyKey: record.idempotencyKey, analysis: structuredClone(record.analysis), confirmations: structuredClone(record.confirmations), strategy: structuredClone(record.strategy), generatedContent: structuredClone(record.generatedContent), critique: structuredClone(record.critique), correction: structuredClone(record.correction), currentStage: record.currentStage, attemptCount: record.attemptCount, nextRetryAt: record.nextRetryAt, errorCode: record.errorCode, templateVersion: record.templateVersion, createdAt: record.createdAt, updatedAt: record.updatedAt };
 }
 
 export class MemoryAppStore implements AppStore {
@@ -433,7 +433,7 @@ export class MemoryAppStore implements AppStore {
     const existing = state().generations.find((generation) => generation.userId === userId && generation.jobId === jobId && generation.idempotencyKey === idempotencyKey);
     if (existing) return publicGeneration(existing);
     const now = new Date().toISOString();
-    const stored: StoredGeneration = { id: crypto.randomUUID(), userId, jobId, idempotencyKey, status: "analyzing", analysis: null, confirmations: [], errorCode: null, templateVersion: null, createdAt: now, updatedAt: now };
+    const stored: StoredGeneration = { id: crypto.randomUUID(), userId, jobId, idempotencyKey, status: "analyzing", analysis: null, confirmations: [], strategy: null, generatedContent: null, critique: null, correction: null, currentStage: null, attemptCount: 0, nextRetryAt: null, errorCode: null, templateVersion: null, createdAt: now, updatedAt: now };
     state().generations.push(stored);
     return publicGeneration(stored);
   }
@@ -448,7 +448,7 @@ export class MemoryAppStore implements AppStore {
     return generation ? publicGeneration(generation) : null;
   }
 
-  async updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; confirmations?: ResumeConfirmation[]; errorCode?: string | null; templateVersion?: number | null }): Promise<ResumeGeneration> {
+  async updateResumeGeneration(userId: string, id: string, input: Parameters<AppStore["updateResumeGeneration"]>[2]): Promise<ResumeGeneration> {
     const generation = state().generations.find((candidate) => candidate.userId === userId && candidate.id === id);
     if (!generation) throw new ResourceNotFoundError("Resume generation");
     Object.assign(generation, input, { updatedAt: new Date(Math.max(Date.now(), new Date(generation.updatedAt).getTime() + 1)).toISOString() });

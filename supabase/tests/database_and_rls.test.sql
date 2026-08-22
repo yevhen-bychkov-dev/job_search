@@ -317,6 +317,8 @@ select lives_ok(
 );
 select is((select count(*) from public.resume_generations), 1::bigint, 'user A can read resume generation state');
 select is((with changed as (update public.resume_generations set status = 'awaiting_confirmation' returning *) select count(*) from changed), 1::bigint, 'user A can advance owned resume generation state');
+select is((with changed as (update public.resume_generations set status = 'strategizing', current_stage = 'strategy', strategy_json = '{"targetPositioning":"Product Engineer"}'::jsonb, attempt_count = 1 returning *) select count(*) from changed), 1::bigint, 'user A can persist a resumable resume strategy stage');
+select is((select strategy_json->>'targetPositioning' from public.resume_generations where id = 'ffffffff-ffff-4fff-8fff-ffffffffffff'), 'Product Engineer', 'resume strategy artifact is persisted');
 
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 select is((select count(*) from public.resume_templates), 0::bigint, 'user B cannot read user A templates');

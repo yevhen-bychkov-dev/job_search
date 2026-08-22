@@ -27,6 +27,39 @@ export type GeneratedCvContent = {
   }>;
 };
 
+export type ResumeAiStage = "analysis" | "strategy" | "generation" | "critique" | "correction" | "render";
+
+export type ResumeStrategy = {
+  targetPositioning: string;
+  topHiringSignals: Array<{ signal: string; priority: "high" | "medium" | "low" }>;
+  evidenceToSurface: Array<{ factId?: string; description: string; supports: string[] }>;
+  skillsToPrioritize: string[];
+  skillsToInclude: string[];
+  experienceThemes: string[];
+  seniorityNarrative: string[];
+  terminologyToUse: string[];
+  itemsToDeEmphasize: string[];
+  unsupportedRequirements: string[];
+  summaryDirection: string;
+  experienceDirections: Array<{ company?: string; goals: string[] }>;
+};
+
+export type ResumeCritiqueProblem = {
+  type: "missing_requirement" | "weak_seniority" | "generic_summary" | "master_resume_similarity" | "missing_skill" | "poor_prioritization" | "unsupported_claim" | "keyword_stuffing" | "weak_bullet" | "other";
+  severity: "high" | "medium" | "low";
+  description: string;
+  suggestedFix?: string;
+};
+
+export type ResumeCritique = {
+  score: number;
+  passes: boolean;
+  problems: ResumeCritiqueProblem[];
+  missingSupportedRequirements: string[];
+  unsupportedClaims: string[];
+  strengths: string[];
+};
+
 export type GeneratedCv = {
   id: string;
   jobId: string;
@@ -42,8 +75,13 @@ export type GeneratedCv = {
 export const RESUME_GENERATION_STATUSES = [
   "analyzing",
   "awaiting_confirmation",
+  "strategizing",
   "generating",
+  "critiquing",
+  "correcting",
   "rendering",
+  "retrying",
+  "rate_limited",
   "completed",
   "failed",
   "cancelled",
@@ -125,6 +163,13 @@ export type ResumeGeneration = {
   idempotencyKey: string;
   analysis: VacancyAnalysis | null;
   confirmations: ResumeConfirmation[];
+  strategy: ResumeStrategy | null;
+  generatedContent: GeneratedCvContent | null;
+  critique: ResumeCritique | null;
+  correction: GeneratedCvContent | null;
+  currentStage: ResumeAiStage | null;
+  attemptCount: number;
+  nextRetryAt: string | null;
   errorCode: string | null;
   templateVersion: number | null;
   createdAt: string;

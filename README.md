@@ -66,15 +66,15 @@ External job boards are isolated behind a common adapter boundary, allowing addi
 
 The resume generation flow is intentionally designed to reduce hallucinations while producing strong professional framing.
 
-The application maintains a validated **Candidate Profile** as the factual source of truth and separates CV work into two stages. First, Gemini analyzes a vacancy and the user edits, approves, adds, or removes requirements in the job card; that requirement set is saved per job. Later CV generations reuse that saved set and do not re-run vacancy analysis. The final stage sends the saved vacancy, requirements, verified profile, and selected experience levels to Gemini for structured ResumeContent, followed by HTML template rendering and PDF generation.
+The application maintains a validated **Candidate Profile** as the factual source of truth and separates CV work into resumable stages. Gemini first analyzes a vacancy and the user edits, approves, adds, or removes requirements in the job card; that requirement set is saved per job. Later CV generations reuse that saved set and do not re-run vacancy analysis. The generation pipeline then creates a vacancy-specific Resume Strategy, generates structured ResumeContent from that strategy, critiques it, performs at most one correction pass when the score is below the configured threshold or a high-severity issue exists, and finally renders the deterministic HTML template to PDF.
 
-Before either AI request, personal contact information is removed. Gemini first analyzes the vacancy and then returns structured ResumeContent. Each final bullet cites source achievement IDs, so the server can allow safe senior inference such as framing a verified end-to-end build as designed and implemented while rejecting unsupported leadership, metrics, or impact claims. Missing evidence is unconfirmed, not “no experience”; only material unknowns are shown for confirmation.
+Before AI requests, personal contact information is removed. Each final bullet cites source achievement IDs, so the server can allow safe senior inference such as framing a verified end-to-end build as designed and implemented while rejecting unsupported leadership, metrics, or impact claims. The master resume is treated as factual source material rather than wording to preserve, and supported or confirmed high-priority requirements are checked for coverage after generation. Missing evidence is unconfirmed, not “no experience”; only material unknowns are shown for confirmation.
 
 The application validates the structured content against the original profile, inserts it into the user's validated HTML template, and generates the PDF with Chromium. Personal contact details are injected during trusted template rendering.
 
 This means the model does not control contact details, arbitrary work history, HTML, CSS, or the final PDF layout. A job’s saved requirements are reusable input for every later CV version for that job.
 
-Each completed resume is stored as an immutable version associated with the corresponding job. Incomplete and failed generation attempts remain lifecycle records and never appear in normal resume history.
+Each completed resume is stored as an immutable version associated with the corresponding job. Strategy, generation, critique, correction, and retry metadata are persisted on the generation operation so 429/5xx failures resume at the failed stage. Gemini requests use bounded exponential backoff with jitter, honor `Retry-After`, and are serialized through a low-concurrency queue. Incomplete and failed generation attempts remain lifecycle records and never appear in normal resume history.
 
 ## Job discovery
 

@@ -1,6 +1,6 @@
 import type { CandidateProfileForAi } from "@/features/knowledge/candidate-profile";
 
-import type { CvSelection, ResumeConfirmation, VacancyAnalysis } from "../types";
+import type { CvSelection, GeneratedCvContent, ResumeConfirmation, ResumeCritique, ResumeStrategy, VacancyAnalysis } from "../types";
 
 export type VacancyAiJob = {
   title: string;
@@ -15,13 +15,20 @@ export type AnalyzeVacancyInput = {
   confirmations: ResumeConfirmation[];
 };
 
-export type GenerateCvInput = AnalyzeVacancyInput & { analysis: VacancyAnalysis };
+export type GenerateCvInput = AnalyzeVacancyInput & { analysis: VacancyAnalysis; strategy?: ResumeStrategy };
+export type ResumeAiContext = { generationId?: string; jobId?: string; stage: "analysis" | "strategy" | "generation" | "critique" | "correction" };
+export type ResumeStrategyInput = GenerateCvInput & { context?: ResumeAiContext };
+export type ResumeCritiqueInput = GenerateCvInput & { strategy: ResumeStrategy; generatedContent: GeneratedCvContent; context?: ResumeAiContext };
+export type ResumeCorrectionInput = ResumeCritiqueInput & { critique: ResumeCritique };
 
 export interface CvAiProvider {
   readonly providerId: string;
   readonly model: string;
-  analyzeVacancy(input: AnalyzeVacancyInput): Promise<unknown>;
-  generateCv(input: GenerateCvInput): Promise<unknown>;
+  analyzeVacancy(input: AnalyzeVacancyInput, context?: ResumeAiContext): Promise<unknown>;
+  createStrategy(input: ResumeStrategyInput): Promise<unknown>;
+  generateCv(input: GenerateCvInput, context?: ResumeAiContext): Promise<unknown>;
+  critiqueCv(input: ResumeCritiqueInput): Promise<unknown>;
+  correctCv(input: ResumeCorrectionInput): Promise<unknown>;
 }
 
 export class CvAiProviderError extends Error {
@@ -88,6 +95,24 @@ export function resumeContentJsonSchema(): Record<string, unknown> {
   };
 }
 
+export function resumeStrategyJsonSchema(): Record<string, unknown> {
+  const strings = { type: "array", maxItems: 100, items: { type: "string" } };
+  return { type: "object", additionalProperties: false, required: ["targetPositioning", "topHiringSignals", "evidenceToSurface", "skillsToPrioritize", "skillsToInclude", "experienceThemes", "seniorityNarrative", "terminologyToUse", "itemsToDeEmphasize", "unsupportedRequirements", "summaryDirection", "experienceDirections"], properties: {
+    targetPositioning: { type: "string" }, topHiringSignals: { type: "array", maxItems: 30, items: { type: "object", additionalProperties: false, required: ["signal", "priority"], properties: { signal: { type: "string" }, priority: { type: "string", enum: ["high", "medium", "low"] } } } },
+    evidenceToSurface: { type: "array", maxItems: 50, items: { type: "object", additionalProperties: false, required: ["description", "supports"], properties: { factId: { type: "string" }, description: { type: "string" }, supports: strings } } },
+    skillsToPrioritize: strings, skillsToInclude: strings, experienceThemes: strings, seniorityNarrative: strings, terminologyToUse: strings, itemsToDeEmphasize: strings, unsupportedRequirements: strings,
+    summaryDirection: { type: "string" }, experienceDirections: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["goals"], properties: { company: { type: "string" }, goals: strings } } },
+  } };
+}
+
+export function resumeCritiqueJsonSchema(): Record<string, unknown> {
+  return { type: "object", additionalProperties: false, required: ["score", "passes", "problems", "missingSupportedRequirements", "unsupportedClaims", "strengths"], properties: {
+    score: { type: "number", minimum: 0, maximum: 10 }, passes: { type: "boolean" },
+    problems: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false, required: ["type", "severity", "description"], properties: { type: { type: "string", enum: ["missing_requirement", "weak_seniority", "generic_summary", "master_resume_similarity", "missing_skill", "poor_prioritization", "unsupported_claim", "keyword_stuffing", "weak_bullet", "other"] }, severity: { type: "string", enum: ["high", "medium", "low"] }, description: { type: "string" }, suggestedFix: { type: "string" } } } },
+    missingSupportedRequirements: { type: "array", maxItems: 80, items: { type: "string" } }, unsupportedClaims: { type: "array", maxItems: 40, items: { type: "string" } }, strengths: { type: "array", maxItems: 40, items: { type: "string" } },
+  } };
+}
+
 export function deterministicAnalysis(input: AnalyzeVacancyInput): VacancyAnalysis {
   const known = new Set([...input.candidate.skills, ...input.candidate.experience.flatMap((experience) => experience.technologies)].map((value) => value.toLocaleLowerCase("en")));
   const requirements = input.job.technologies.map((technology) => ({
@@ -106,16 +131,32 @@ export function deterministicAnalysis(input: AnalyzeVacancyInput): VacancyAnalys
 }
 
 export function deterministicResume(input: GenerateCvInput): Record<string, unknown> {
+  const relevantSkills = [...new Set([...input.analysis.mustHaveTechnical, ...input.analysis.tooling, ...input.analysis.architecture].filter((requirement) => requirement.status === "supported").map((requirement) => requirement.label))];
   return {
     headline: input.job.title || input.candidate.professionalTitle,
-    summary: input.candidate.summary,
-    skills: [...input.candidate.skills],
+    summary: input.job.title ? `${input.job.title} focused on ${relevantSkills.slice(0, 3).join(", ") || input.candidate.professionalTitle || "product engineering"}.` : input.candidate.summary,
+    skills: [...new Set([...relevantSkills, ...input.candidate.skills])],
     experience: input.candidate.experience.map((experience) => ({
       experienceId: experience.id,
       bullets: experience.achievements.map((achievement) => ({ text: achievement.text, sourceAchievementIds: [achievement.id] })),
     })),
     educationIds: input.candidate.education.map((education) => education.id),
   };
+}
+
+export function deterministicStrategy(input: GenerateCvInput): Record<string, unknown> {
+  const relevant = [...input.analysis.mustHaveTechnical, ...input.analysis.tooling, ...input.analysis.architecture].filter((requirement) => requirement.status !== "unconfirmed");
+  return {
+    targetPositioning: input.job.title || input.candidate.professionalTitle || "Product Engineer",
+    topHiringSignals: input.analysis.senioritySignals.map((signal) => ({ signal, priority: "high" })),
+    evidenceToSurface: input.candidate.experience.flatMap((experience) => experience.achievements.slice(0, 2).map((achievement) => ({ factId: achievement.id, description: achievement.text, supports: relevant.map((requirement) => requirement.label).slice(0, 5) }))),
+    skillsToPrioritize: relevant.map((requirement) => requirement.label), skillsToInclude: relevant.map((requirement) => requirement.label), experienceThemes: input.analysis.responsibilities.map((requirement) => requirement.label), seniorityNarrative: input.analysis.senioritySignals, terminologyToUse: input.analysis.employerTerminology, itemsToDeEmphasize: [], unsupportedRequirements: input.analysis.mustHaveTechnical.filter((requirement) => requirement.status === "unconfirmed").map((requirement) => requirement.label), summaryDirection: `Position the candidate for ${input.job.title}.`, experienceDirections: input.candidate.experience.map((experience) => ({ company: experience.company, goals: experience.achievements.slice(0, 3).map((achievement) => achievement.text) })),
+  };
+}
+
+export function deterministicCritique(input: ResumeCritiqueInput): Record<string, unknown> {
+  const missing = input.analysis.mustHaveTechnical.filter((requirement) => requirement.status !== "unconfirmed" && !input.generatedContent.skills.some((skill) => skill.toLocaleLowerCase("en").includes(requirement.label.toLocaleLowerCase("en"))) && !input.generatedContent.summary?.toLocaleLowerCase("en").includes(requirement.label.toLocaleLowerCase("en"))).map((requirement) => requirement.label);
+  return { score: missing.length ? 7 : 9, passes: missing.length === 0, problems: missing.map((label) => ({ type: "missing_skill", severity: "high", description: `${label} is not represented.`, suggestedFix: `Add verified evidence for ${label}.` })), missingSupportedRequirements: missing, unsupportedClaims: [], strengths: ["Uses cited candidate evidence."] };
 }
 
 export function selectionJsonSchema(input: { candidate: CandidateProfileForAi; job?: VacancyAiJob }): Record<string, unknown> {

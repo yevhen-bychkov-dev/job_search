@@ -256,12 +256,19 @@ export type Database = {
         Row: {
           analysis_json: Json | null;
           confirmations_json: Json;
+          correction_json: Json | null;
+          critique_json: Json | null;
+          current_stage: string | null;
           created_at: string;
           error_code: string | null;
+          generation_json: Json | null;
           id: string;
           idempotency_key: string;
           job_id: string;
+          attempt_count: number;
+          next_retry_at: string | null;
           status: Database["public"]["Enums"]["resume_generation_status"];
+          strategy_json: Json | null;
           template_version: number | null;
           updated_at: string;
           user_id: string;
@@ -269,12 +276,19 @@ export type Database = {
         Insert: {
           analysis_json?: Json | null;
           confirmations_json?: Json;
+          correction_json?: Json | null;
+          critique_json?: Json | null;
+          current_stage?: string | null;
           created_at?: string;
           error_code?: string | null;
+          generation_json?: Json | null;
           id?: string;
           idempotency_key: string;
           job_id: string;
+          attempt_count?: number;
+          next_retry_at?: string | null;
           status?: Database["public"]["Enums"]["resume_generation_status"];
+          strategy_json?: Json | null;
           template_version?: number | null;
           updated_at?: string;
           user_id: string;
@@ -282,12 +296,19 @@ export type Database = {
         Update: {
           analysis_json?: Json | null;
           confirmations_json?: Json;
+          correction_json?: Json | null;
+          critique_json?: Json | null;
+          current_stage?: string | null;
           created_at?: string;
           error_code?: string | null;
+          generation_json?: Json | null;
           id?: string;
           idempotency_key?: string;
           job_id?: string;
+          attempt_count?: number;
+          next_retry_at?: string | null;
           status?: Database["public"]["Enums"]["resume_generation_status"];
+          strategy_json?: Json | null;
           template_version?: number | null;
           updated_at?: string;
           user_id?: string;
@@ -376,8 +397,13 @@ export type Database = {
       resume_generation_status:
         | "analyzing"
         | "awaiting_confirmation"
+        | "strategizing"
         | "generating"
+        | "critiquing"
+        | "correcting"
         | "rendering"
+        | "retrying"
+        | "rate_limited"
         | "completed"
         | "failed"
         | "cancelled";

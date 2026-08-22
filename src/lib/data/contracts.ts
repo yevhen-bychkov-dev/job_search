@@ -1,5 +1,5 @@
 import type { FilterSettings } from "@/features/filters/types";
-import type { GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
+import type { GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeAiStage, ResumeConfirmation, ResumeCritique, ResumeGeneration, ResumeGenerationStatus, ResumeStrategy, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
 import type { KnowledgeDocumentKind, KnowledgeFile } from "@/features/knowledge/types";
@@ -92,7 +92,7 @@ export interface AppStore {
   createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration>;
   getResumeGeneration(userId: string, id: string): Promise<ResumeGeneration | null>;
   getLatestResumeGeneration(userId: string, jobId: string): Promise<ResumeGeneration | null>;
-  updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; confirmations?: ResumeConfirmation[]; errorCode?: string | null; templateVersion?: number | null }): Promise<ResumeGeneration>;
+  updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; confirmations?: ResumeConfirmation[]; strategy?: ResumeStrategy | null; generatedContent?: GeneratedCvContent | null; critique?: ResumeCritique | null; correction?: GeneratedCvContent | null; currentStage?: ResumeAiStage | null; attemptCount?: number; nextRetryAt?: string | null; errorCode?: string | null; templateVersion?: number | null }): Promise<ResumeGeneration>;
   listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]>;
   createGeneratedCv(
     userId: string,

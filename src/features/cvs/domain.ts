@@ -9,6 +9,9 @@ import type {
   GeneratedCvContent,
   ResumeConfirmation,
   ResumeConfirmationQuestion,
+  ResumeCritique,
+  ResumeCritiqueProblem,
+  ResumeStrategy,
   JobRequirementLevel,
   JobResumeRequirements,
   SavedJobRequirement,
@@ -18,6 +21,8 @@ import type {
 } from "./types";
 
 type ParseResult<T> = { ok: true; data: T } | { ok: false; message: string };
+
+export type ResumeCoverageResult = { ok: true } | { ok: false; missing: string[] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -41,6 +46,63 @@ function stringList(
   }
   if (new Set(value).size !== value.length) return { ok: false, message: `${field} contains duplicate values.` };
   return { ok: true, data: value };
+}
+
+function optionalString(value: unknown, field: string, maximum = 600): ParseResult<string> {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > maximum) return { ok: false, message: `${field} is invalid.` };
+  return { ok: true, data: value.trim() };
+}
+
+export function parseResumeStrategy(value: unknown): ParseResult<ResumeStrategy> {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["targetPositioning", "topHiringSignals", "evidenceToSurface", "skillsToPrioritize", "skillsToInclude", "experienceThemes", "seniorityNarrative", "terminologyToUse", "itemsToDeEmphasize", "unsupportedRequirements", "summaryDirection", "experienceDirections"])) return { ok: false, message: "Resume strategy contains unsupported fields." };
+  const targetPositioning = optionalString(value.targetPositioning, "strategy.targetPositioning");
+  const summaryDirection = optionalString(value.summaryDirection, "strategy.summaryDirection");
+  if (!targetPositioning.ok) return targetPositioning;
+  if (!summaryDirection.ok) return summaryDirection;
+  const lists = [
+    ["skillsToPrioritize", value.skillsToPrioritize, 100, 100], ["skillsToInclude", value.skillsToInclude, 100, 100], ["experienceThemes", value.experienceThemes, 30, 240],
+    ["seniorityNarrative", value.seniorityNarrative, 30, 240], ["terminologyToUse", value.terminologyToUse, 100, 120], ["itemsToDeEmphasize", value.itemsToDeEmphasize, 50, 240], ["unsupportedRequirements", value.unsupportedRequirements, 80, 160],
+  ] as const;
+  const parsedLists: Record<string, string[]> = {};
+  for (const [field, candidate, maximum, itemLength] of lists) {
+    const parsed = stringList(candidate, `strategy.${field}`, maximum, itemLength);
+    if (!parsed.ok) return parsed;
+    parsedLists[field] = parsed.data;
+  }
+  if (!Array.isArray(value.topHiringSignals) || value.topHiringSignals.length > 30 || !value.topHiringSignals.every((item) => isRecord(item) && hasOnlyKeys(item, ["signal", "priority"]) && typeof item.signal === "string" && item.signal.length > 0 && ["high", "medium", "low"].includes(String(item.priority)))) return { ok: false, message: "strategy.topHiringSignals is invalid." };
+  if (!Array.isArray(value.evidenceToSurface) || value.evidenceToSurface.length > 50 || !value.evidenceToSurface.every((item) => isRecord(item) && hasOnlyKeys(item, ["factId", "description", "supports"]) && (item.factId === undefined || typeof item.factId === "string") && typeof item.description === "string" && item.description.length > 0 && Array.isArray(item.supports) && item.supports.every((entry) => typeof entry === "string" && entry.length > 0))) return { ok: false, message: "strategy.evidenceToSurface is invalid." };
+  if (!Array.isArray(value.experienceDirections) || value.experienceDirections.length > 20 || !value.experienceDirections.every((item) => isRecord(item) && hasOnlyKeys(item, ["company", "goals"]) && (item.company === undefined || typeof item.company === "string") && Array.isArray(item.goals) && item.goals.length > 0 && item.goals.every((goal) => typeof goal === "string" && goal.length > 0))) return { ok: false, message: "strategy.experienceDirections is invalid." };
+  return {
+    ok: true,
+    data: {
+      targetPositioning: targetPositioning.data,
+      topHiringSignals: value.topHiringSignals.map((item) => ({ signal: String((item as Record<string, unknown>).signal), priority: (item as Record<string, unknown>).priority as "high" | "medium" | "low" })),
+      evidenceToSurface: value.evidenceToSurface.map((item) => ({ factId: typeof (item as Record<string, unknown>).factId === "string" ? (item as Record<string, unknown>).factId as string : undefined, description: String((item as Record<string, unknown>).description), supports: ((item as Record<string, unknown>).supports as string[]).slice() })),
+      skillsToPrioritize: parsedLists.skillsToPrioritize, skillsToInclude: parsedLists.skillsToInclude, experienceThemes: parsedLists.experienceThemes,
+      seniorityNarrative: parsedLists.seniorityNarrative, terminologyToUse: parsedLists.terminologyToUse, itemsToDeEmphasize: parsedLists.itemsToDeEmphasize,
+      unsupportedRequirements: parsedLists.unsupportedRequirements, summaryDirection: summaryDirection.data,
+      experienceDirections: value.experienceDirections.map((item) => ({ company: typeof (item as Record<string, unknown>).company === "string" ? (item as Record<string, unknown>).company as string : undefined, goals: ((item as Record<string, unknown>).goals as string[]).slice() })),
+    },
+  };
+}
+
+const CRITIQUE_TYPES: ResumeCritiqueProblem["type"][] = ["missing_requirement", "weak_seniority", "generic_summary", "master_resume_similarity", "missing_skill", "poor_prioritization", "unsupported_claim", "keyword_stuffing", "weak_bullet", "other"];
+
+export function parseResumeCritique(value: unknown): ParseResult<ResumeCritique> {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["score", "passes", "problems", "missingSupportedRequirements", "unsupportedClaims", "strengths"]) || typeof value.score !== "number" || value.score < 0 || value.score > 10 || typeof value.passes !== "boolean") return { ok: false, message: "Resume critique contains unsupported fields." };
+  const problems: ResumeCritiqueProblem[] = [];
+  if (!Array.isArray(value.problems) || value.problems.length > 40) return { ok: false, message: "Resume critique problems are invalid." };
+  for (const item of value.problems) {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["type", "severity", "description", "suggestedFix"]) || !CRITIQUE_TYPES.includes(item.type as ResumeCritiqueProblem["type"]) || !["high", "medium", "low"].includes(String(item.severity)) || typeof item.description !== "string" || item.description.length === 0 || (item.suggestedFix !== undefined && typeof item.suggestedFix !== "string")) return { ok: false, message: "A resume critique problem is invalid." };
+    problems.push({ type: item.type as ResumeCritiqueProblem["type"], severity: item.severity as ResumeCritiqueProblem["severity"], description: item.description, suggestedFix: item.suggestedFix as string | undefined });
+  }
+  const missing = stringList(value.missingSupportedRequirements, "critique.missingSupportedRequirements", 80, 160);
+  const unsupported = stringList(value.unsupportedClaims, "critique.unsupportedClaims", 40, 300);
+  const strengths = stringList(value.strengths, "critique.strengths", 40, 300);
+  if (!missing.ok) return missing;
+  if (!unsupported.ok) return unsupported;
+  if (!strengths.ok) return strengths;
+  return { ok: true, data: { score: value.score, passes: value.passes, problems, missingSupportedRequirements: missing.data, unsupportedClaims: unsupported.data, strengths: strengths.data } };
 }
 
 export function parseCvSelection(value: unknown): ParseResult<CvSelection> {
@@ -369,13 +431,20 @@ export function materializeResumeContent(
   const headline = value.headline === null ? null : typeof value.headline === "string" && value.headline.length <= 160 ? value.headline : null;
   const summary = value.summary === null ? null : typeof value.summary === "string" && value.summary.length <= 1200 ? value.summary : null;
   if (value.headline !== null && headline === null || value.summary !== null && summary === null) return { ok: false, message: "The model resume headline or summary is invalid." };
-  const allowedSkills = new Set(profile.skills.map(normalized));
-  for (const confirmation of confirmations) if (confirmation.level === "commercial") allowedSkills.add(normalized(confirmation.label));
+  const allowedSkills = new Set([
+    ...profile.skills,
+    ...profile.experience.flatMap((experience) => experience.technologies),
+  ].map(normalized));
+  const familiarSkills = new Set<string>();
+  for (const confirmation of confirmations) {
+    if (confirmation.level === "commercial") allowedSkills.add(normalized(confirmation.label));
+    if (confirmation.level === "familiar") familiarSkills.add(normalized(`familiar: ${confirmation.label}`));
+  }
   const skills = stringList(value.skills, "resume skills", 100, 100);
   const educationIds = stringList(value.educationIds, "resume education", 20, 64);
   if (!skills.ok) return skills;
   if (!educationIds.ok) return educationIds;
-  const verifiedSkills = skills.data.filter((skill) => allowedSkills.has(normalized(skill)));
+  const verifiedSkills = skills.data.filter((skill) => allowedSkills.has(normalized(skill)) || familiarSkills.has(normalized(skill)));
   if (!Array.isArray(value.experience) || value.experience.length < 1 || value.experience.length > profile.experience.length) return { ok: false, message: "The model experience selection is invalid." };
   const experienceById = new Map(profile.experience.map((experience) => [experience.id, experience]));
   const selected = new Set<string>();
@@ -406,7 +475,7 @@ export function materializeResumeContent(
   return {
     ok: true,
     data: {
-      headline,
+      headline: headline ?? profile.personal.title,
       summary,
       skills: verifiedSkills,
       experience,
@@ -416,4 +485,17 @@ export function materializeResumeContent(
       }),
     },
   };
+}
+
+export function validateResumeRequirementCoverage(
+  analysis: VacancyAnalysis,
+  confirmations: readonly ResumeConfirmation[],
+  content: GeneratedCvContent,
+): ResumeCoverageResult {
+  const confirmed = new Map(confirmations.map((confirmation) => [confirmation.key, confirmation]));
+  const requirements = REQUIREMENT_SECTIONS.flatMap((section) => analysis[section])
+    .filter((requirement) => requirement.importance === "must_have" && (requirement.status === "supported" || requirement.status === "confirmed_familiar" || confirmed.get(requirement.key)?.level === "commercial" || confirmed.get(requirement.key)?.level === "familiar"));
+  const searchable = normalized([content.headline ?? "", content.summary ?? "", ...content.skills, ...content.experience.flatMap((experience) => [experience.role, ...experience.technologies, ...experience.achievements])].join(" "));
+  const missing = requirements.filter((requirement) => !searchable.includes(normalized(requirement.label))).map((requirement) => requirement.label);
+  return missing.length > 0 ? { ok: false, missing } : { ok: true };
 }

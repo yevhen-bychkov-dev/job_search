@@ -151,13 +151,16 @@ test("Gemini retries transient HTTP failures and not permanent request errors", 
   assert.equal(permanentAttempts, 1);
 
   let rateLimitAttempts = 0;
+  const rateLimitDelays: number[] = [];
   const rateLimited = await fetchGeminiWithRetry(
-    async () => { rateLimitAttempts += 1; return new Response("{}", { status: 429, headers: { "retry-after": "1" } }); },
+    async () => { rateLimitAttempts += 1; return new Response("{}", { status: rateLimitAttempts < 3 ? 429 : 200, headers: { "retry-after": "1" } }); },
     "https://example.test/gemini",
     () => ({ method: "POST" }),
+    async (milliseconds) => { rateLimitDelays.push(milliseconds); },
   );
-  assert.equal(rateLimited.status, 429);
-  assert.equal(rateLimitAttempts, 1);
+  assert.equal(rateLimited.status, 200);
+  assert.equal(rateLimitAttempts, 3);
+  assert.deepEqual(rateLimitDelays, [1_000, 1_000]);
 });
 
 test("Gemini falls back only after persistent primary-model 503 responses", async () => {
@@ -207,11 +210,26 @@ test("Gemini falls back only after persistent primary-model 503 responses", asyn
     () => ({ method: "POST" }),
   );
   assert.equal(rateLimited.response.status, 200);
-  assert.equal(rateLimited.model, "gemini-3.6-flash");
+  assert.equal(rateLimited.model, "gemini-3.7-flash");
   assert.deepEqual(rateLimitEndpoints, [
     "https://example.test/gemini-3.7-flash",
-    "https://example.test/gemini-3.6-flash",
+    "https://example.test/gemini-3.7-flash",
   ]);
+});
+
+test("Gemini retry exhaustion remains bounded for transient failures", async () => {
+  let attempts = 0;
+  const delays: number[] = [];
+  const response = await fetchGeminiWithRetry(
+    async () => { attempts += 1; return new Response("{}", { status: 500 }); },
+    "https://example.test/gemini",
+    () => ({ method: "POST" }),
+    async (milliseconds) => { delays.push(milliseconds); },
+    () => 0.5,
+  );
+  assert.equal(response.status, 500);
+  assert.equal(attempts, 5);
+  assert.equal(delays.length, 4);
 });
 
 test("resume confirmations are deduplicated with the newest explicit answer winning", () => {

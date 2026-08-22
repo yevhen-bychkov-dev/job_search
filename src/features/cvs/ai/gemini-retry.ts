@@ -3,13 +3,14 @@ const BASE_DELAY_MS = 1_000;
 const MAX_RETRY_AFTER_MS = 15_000;
 
 type Wait = (milliseconds: number) => Promise<void>;
+export type GeminiRetryMetadata = { generationId?: string | null; jobId?: string | null; stage?: string; model?: string };
 
 export function isGeminiTimeout(error: unknown): boolean {
   return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }
 
 export function isRetryableGeminiStatus(status: number): boolean {
-  return status === 408 || status === 429 || status >= 500;
+  return status === 408 || status === 429 || (status >= 500 && status <= 504);
 }
 
 function retryAfterDelay(response: Response): number | null {
@@ -22,10 +23,6 @@ function retryAfterDelay(response: Response): number | null {
 }
 
 function retryDelay(response: Response, retryIndex: number, random: () => number): number | null {
-  // A 429 is returned by Gemini when the quota/rate limit is exhausted. A
-  // retry is another request against the same limit, so leave 429 handling to
-  // the model fallback instead of retrying the same model.
-  if (response.status === 429) return null;
   const retryAfter = retryAfterDelay(response);
   if (retryAfter !== null) return retryAfter;
   const exponentialDelay = BASE_DELAY_MS * (2 ** retryIndex);
@@ -41,6 +38,7 @@ export async function fetchGeminiWithRetry(
   init: () => RequestInit,
   waitImplementation: Wait = wait,
   random: () => number = Math.random,
+  metadata: GeminiRetryMetadata = {},
 ): Promise<Response> {
   let lastNetworkError: unknown;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
@@ -49,16 +47,34 @@ export async function fetchGeminiWithRetry(
       if (response.ok || !isRetryableGeminiStatus(response.status) || attempt === MAX_ATTEMPTS - 1) return response;
       const delay = retryDelay(response, attempt, random);
       if (delay === null) return response;
+      console.info(JSON.stringify({ event: "resume.gemini.retry", ...metadata, attempt: attempt + 1, nextAttempt: attempt + 2, responseStatus: Math.floor(response.status / 100) * 100, retryDelayMs: delay }));
       await response.body?.cancel().catch(() => undefined);
       await waitImplementation(delay);
     } catch (error) {
       lastNetworkError = error;
-      if (isGeminiTimeout(error) || attempt === MAX_ATTEMPTS - 1) throw error;
+      if (attempt === MAX_ATTEMPTS - 1) throw error;
       const jitterMultiplier = 0.75 + (random() * 0.5);
-      await waitImplementation(Math.round(BASE_DELAY_MS * (2 ** attempt) * jitterMultiplier));
+      const delay = Math.round(BASE_DELAY_MS * (2 ** attempt) * jitterMultiplier);
+      console.info(JSON.stringify({ event: "resume.gemini.retry", ...metadata, attempt: attempt + 1, nextAttempt: attempt + 2, responseStatus: "network", retryDelayMs: delay }));
+      await waitImplementation(delay);
     }
   }
   throw lastNetworkError ?? new Error("Gemini retry loop ended without a response.");
+}
+
+let activeGeminiRequests = 0;
+const queuedGeminiRequests: Array<() => void> = [];
+
+/** Keep free-tier Gemini traffic serialized across resume operations. */
+export async function withGeminiConcurrency<T>(work: () => Promise<T>): Promise<T> {
+  if (activeGeminiRequests >= 1) await new Promise<void>((resolve) => queuedGeminiRequests.push(resolve));
+  activeGeminiRequests += 1;
+  try {
+    return await work();
+  } finally {
+    activeGeminiRequests -= 1;
+    queuedGeminiRequests.shift()?.();
+  }
 }
 
 export async function fetchGeminiWithFallback(
@@ -69,6 +85,7 @@ export async function fetchGeminiWithFallback(
   init: () => RequestInit,
   waitImplementation: Wait = wait,
   random: () => number = Math.random,
+  metadata: GeminiRetryMetadata = {},
 ): Promise<{ response: Response; model: string }> {
   const primaryResponse = await fetchGeminiWithRetry(
     fetchImplementation,
@@ -76,6 +93,7 @@ export async function fetchGeminiWithFallback(
     init,
     waitImplementation,
     random,
+    { ...metadata, model: primaryModel },
   );
   const shouldUseFallback = primaryResponse.status === 429 || primaryResponse.status === 503;
   if (!shouldUseFallback || !fallbackModel || fallbackModel === primaryModel) {
@@ -88,6 +106,7 @@ export async function fetchGeminiWithFallback(
     init,
     waitImplementation,
     random,
+    { ...metadata, model: fallbackModel },
   );
   return { response: fallbackResponse, model: fallbackModel };
 }

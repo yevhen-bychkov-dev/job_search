@@ -102,7 +102,9 @@ export function renderResumeTemplate(templateHtml: string, input: ResumeTemplate
   if (validation) throw new Error(validation);
   const values: Record<string, string> = {
     "resume.name": escapeHtml(input.personal.name),
-    "resume.title": escapeHtml(input.personal.title ?? ""),
+    // Uploaded templates commonly use resume.title for the top heading. The
+    // vacancy-specific generated headline must win over the profile default.
+    "resume.title": escapeHtml(input.content.headline ?? input.personal.title ?? ""),
     "resume.location": escapeHtml(input.personal.location ?? ""),
     "resume.email": escapeHtml(input.personal.email ?? ""),
     "resume.phone": escapeHtml(input.personal.phone ?? ""),

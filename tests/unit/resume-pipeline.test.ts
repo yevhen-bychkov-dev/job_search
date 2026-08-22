@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
-import { confirmationQuestions, matchVacancyAnalysis, materializeResumeContent, parseVacancyAnalysis, savedJobRequirementsFromAnalysis, savedJobRequirementsToAnalysis, validateSavedJobRequirements } from "../../src/features/cvs/domain.ts";
-import { deterministicAnalysis, deterministicResume } from "../../src/features/cvs/ai/provider.ts";
+import { confirmationQuestions, matchVacancyAnalysis, materializeResumeContent, parseResumeCritique, parseResumeStrategy, parseVacancyAnalysis, savedJobRequirementsFromAnalysis, savedJobRequirementsToAnalysis, validateResumeRequirementCoverage, validateSavedJobRequirements } from "../../src/features/cvs/domain.ts";
+import { deterministicAnalysis, deterministicResume, geminiResponseSchema, resumeContentJsonSchema, resumeCritiqueJsonSchema, resumeStrategyJsonSchema } from "../../src/features/cvs/ai/provider.ts";
+import { buildGeminiResumeRequest, buildGeminiStrategyRequest } from "../../src/features/cvs/ai/gemini-request.ts";
 import { renderResumeTemplate, validateResumeTemplateText } from "../../src/features/cvs/template.ts";
 
 function profile() {
@@ -100,4 +101,44 @@ test("resume templates reject executable content and render escaped data", () =>
   assert.match(html, /&lt;Synthetic&gt;/);
   assert.match(html, /Built &lt;safe&gt; components\./);
   assert.doesNotMatch(html, /\{\{resume/);
+});
+
+test("strategy and generation requests carry vacancy-specific prioritization and confirmations", () => {
+  const candidate = candidateProfileForAi(profile());
+  const analysis = deterministicAnalysis({ job: { title: "Product Engineer", company: "Synthetic Co", description: "Build with React", technologies: ["React"] }, candidate, confirmations: [] });
+  const strategy = {
+    targetPositioning: "Product Engineer",
+    topHiringSignals: [{ signal: "end-to-end delivery", priority: "high" as const }],
+    evidenceToSurface: [{ factId: "accessible-design-system", description: "Shared components", supports: ["React"] }],
+    skillsToPrioritize: ["React"], skillsToInclude: ["React"], experienceThemes: ["delivery"], seniorityNarrative: ["ownership"], terminologyToUse: ["product"], itemsToDeEmphasize: [], unsupportedRequirements: [], summaryDirection: "Lead with product delivery.", experienceDirections: [{ company: "Synthetic Labs", goals: ["Surface shared component delivery"] }],
+  };
+  assert.equal(parseResumeStrategy(strategy).ok, true);
+  const request = buildGeminiResumeRequest({ job: { title: "Product Engineer", company: "Synthetic Co", description: "Build with React", technologies: ["React"] }, candidate, confirmations: [{ key: "graphql", label: "GraphQL", level: "familiar", provenance: "explicit_user_confirmation" }], analysis, strategy });
+  assert.match(JSON.stringify(request), /Authoritative Resume Strategy/);
+  assert.match(JSON.stringify(request), /familiar/i);
+  assert.deepEqual((request.generationConfig as Record<string, unknown>).responseSchema, geminiResponseSchema(resumeContentJsonSchema()));
+  assert.equal(typeof resumeStrategyJsonSchema, "function");
+  assert.equal(typeof resumeCritiqueJsonSchema, "function");
+  assert.equal(typeof buildGeminiStrategyRequest, "function");
+});
+
+test("Familiar confirmation stays distinct and headline maps to the template title", () => {
+  const candidate = profile();
+  const job = { title: "Product Engineer", company: "Synthetic Co", description: "", technologies: ["React"] };
+  const generated = deterministicResume({ job, candidate: candidateProfileForAi(candidate), confirmations: [{ key: "graphql", label: "GraphQL", level: "familiar", provenance: "explicit_user_confirmation" }], analysis: deterministicAnalysis({ job, candidate: candidateProfileForAi(candidate), confirmations: [] }) });
+  generated.headline = "Senior Product Engineer";
+  generated.skills = ["React", "Familiar: GraphQL"];
+  const materialized = materializeResumeContent(candidate, generated, [{ key: "graphql", label: "GraphQL", level: "familiar", provenance: "explicit_user_confirmation" }]);
+  assert.equal(materialized.ok, true);
+  if (!materialized.ok) return;
+  assert.equal(materialized.data.headline, "Senior Product Engineer");
+  assert.deepEqual(materialized.data.skills, ["React", "Familiar: GraphQL"]);
+  const coverage = validateResumeRequirementCoverage({ ...deterministicAnalysis({ job, candidate: candidateProfileForAi(candidate), confirmations: [] }), mustHaveTechnical: [{ key: "react", label: "React", category: "technical", importance: "must_have", status: "supported", evidence: ["React"] }] }, [], materialized.data);
+  assert.equal(coverage.ok, true);
+});
+
+test("critique parser rejects unsupported fields and accepts one structured correction review", () => {
+  const critique = { score: 7, passes: false, problems: [{ type: "missing_skill", severity: "high", description: "React is missing", suggestedFix: "Add verified React evidence." }], missingSupportedRequirements: ["React"], unsupportedClaims: [], strengths: ["Evidence cited"] };
+  assert.equal(parseResumeCritique(critique).ok, true);
+  assert.equal(parseResumeCritique({ ...critique, extra: true }).ok, false);
 });
