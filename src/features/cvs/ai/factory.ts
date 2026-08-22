@@ -27,9 +27,19 @@ function requiredEnvironment(name: "GEMINI_API_KEY" | "GEMINI_MODEL"): string {
   return value;
 }
 
+function validModel(name: string, value: string): string {
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(value)) throw new CvAiProviderError("GEMINI_MODEL_INVALID", `${name} has an invalid format.`);
+  return value;
+}
+
 export function createCvAiProvider(): CvAiProvider {
   if (isPlaywrightTestMode()) return new SyntheticCvProvider();
-  const model = requiredEnvironment("GEMINI_MODEL");
-  if (!/^[A-Za-z0-9._-]{1,100}$/.test(model)) throw new CvAiProviderError("GEMINI_MODEL_INVALID", "GEMINI_MODEL has an invalid format.");
-  return new GeminiCvProvider(model, requiredEnvironment("GEMINI_API_KEY"));
+  const model = validModel("GEMINI_MODEL", requiredEnvironment("GEMINI_MODEL"));
+  const configuredFallback = process.env.GEMINI_FALLBACK_MODEL?.trim();
+  const fallbackModel = configuredFallback && configuredFallback !== "PASTE_HERE"
+    ? validModel("GEMINI_FALLBACK_MODEL", configuredFallback)
+    : model === "gemini-3.7-flash"
+      ? "gemini-3.6-flash"
+      : null;
+  return new GeminiCvProvider(model, requiredEnvironment("GEMINI_API_KEY"), fallbackModel);
 }

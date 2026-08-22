@@ -245,6 +245,16 @@ export function matchVacancyAnalysis(
   return matched;
 }
 
+export function mergeResumeConfirmations(
+  ...groups: Array<readonly ResumeConfirmation[]>
+): ResumeConfirmation[] {
+  const confirmationsByKey = new Map<string, ResumeConfirmation>();
+  for (const group of groups) {
+    for (const confirmation of group) confirmationsByKey.set(confirmation.key, confirmation);
+  }
+  return [...confirmationsByKey.values()];
+}
+
 export function confirmationQuestions(analysis: VacancyAnalysis): ResumeConfirmationQuestion[] {
   const lists: VacancyRequirement[] = [
     ...analysis.mustHaveTechnical,

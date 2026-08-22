@@ -3,9 +3,9 @@ import test from "node:test";
 
 import { CvAiProviderError, extractGeminiStructuredResponse, geminiResponseSchema, selectionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
 import { buildGeminiCvRequest } from "../../src/features/cvs/ai/gemini-request.ts";
-import { fetchGeminiWithRetry, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
+import { fetchGeminiWithFallback, fetchGeminiWithRetry, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
-import { materializeGeneratedCv, nextCvVersion, parseCvSelection, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
+import { materializeGeneratedCv, mergeResumeConfirmations, nextCvVersion, parseCvSelection, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
 import { renderCvPdf } from "../../src/features/cvs/pdf.ts";
 
 function profile() {
@@ -136,9 +136,10 @@ test("Gemini retries transient HTTP failures and not permanent request errors", 
     "https://example.test/gemini",
     () => ({ method: "POST" }),
     async (milliseconds) => { delays.push(milliseconds); },
+    () => 0.5,
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(delays, [500, 1_000]);
+  assert.deepEqual(delays, [1_000, 2_000]);
 
   let permanentAttempts = 0;
   const permanent = await fetchGeminiWithRetry(
@@ -148,6 +149,56 @@ test("Gemini retries transient HTTP failures and not permanent request errors", 
   );
   assert.equal(permanent.status, 400);
   assert.equal(permanentAttempts, 1);
+});
+
+test("Gemini falls back only after persistent primary-model 503 responses", async () => {
+  const endpoints: string[] = [];
+  const delays: number[] = [];
+  const result = await fetchGeminiWithFallback(
+    async (endpoint) => {
+      endpoints.push(String(endpoint));
+      return new Response("{}", { status: endpoints.length <= 5 ? 503 : 200 });
+    },
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    (model) => `https://example.test/${model}`,
+    () => ({ method: "POST" }),
+    async (milliseconds) => { delays.push(milliseconds); },
+    () => 0.5,
+  );
+  assert.equal(result.response.status, 200);
+  assert.equal(result.model, "gemini-3.6-flash");
+  assert.deepEqual(endpoints, [
+    ...Array.from({ length: 5 }, () => "https://example.test/gemini-3.7-flash"),
+    "https://example.test/gemini-3.6-flash",
+  ]);
+  assert.deepEqual(delays, [1_000, 2_000, 4_000, 8_000]);
+
+  let fallbackCalls = 0;
+  const permanent = await fetchGeminiWithFallback(
+    async () => { fallbackCalls += 1; return new Response("{}", { status: 400 }); },
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    (model) => `https://example.test/${model}`,
+    () => ({ method: "POST" }),
+  );
+  assert.equal(permanent.response.status, 400);
+  assert.equal(permanent.model, "gemini-3.7-flash");
+  assert.equal(fallbackCalls, 1);
+});
+
+test("resume confirmations are deduplicated with the newest explicit answer winning", () => {
+  const merged = mergeResumeConfirmations(
+    [{ key: "azure", label: "Azure", level: "familiar", provenance: "explicit_user_confirmation" }],
+    [
+      { key: "azure", label: "Azure cloud stack", level: "commercial", provenance: "explicit_user_confirmation" },
+      { key: "cqrs", label: "CQRS", level: "none", provenance: "explicit_user_confirmation" },
+    ],
+  );
+  assert.deepEqual(merged, [
+    { key: "azure", label: "Azure cloud stack", level: "commercial", provenance: "explicit_user_confirmation" },
+    { key: "cqrs", label: "CQRS", level: "none", provenance: "explicit_user_confirmation" },
+  ]);
 });
 
 test("Gemini request includes saved-job context and excludes contact PII", () => {

@@ -7,7 +7,7 @@ import { reportUnexpectedError } from "@/lib/server-errors";
 
 import { createCvAiProvider } from "./ai/factory";
 import { CvAiProviderError } from "./ai/provider";
-import { matchVacancyAnalysis, confirmationQuestions, materializeResumeContent, parseVacancyAnalysis } from "./domain";
+import { matchVacancyAnalysis, confirmationQuestions, materializeResumeContent, mergeResumeConfirmations, parseVacancyAnalysis } from "./domain";
 import { renderHtmlToPdf } from "./html-to-pdf";
 import { renderResumeTemplate, validateResumeTemplateBytes } from "./template";
 import type { GeneratedCv, ResumeConfirmation, ResumeConfirmationLevel, ResumeGeneration, ResumeConfirmationQuestion } from "./types";
@@ -166,8 +166,8 @@ export async function confirmAndGenerateResume(userId: string, generationId: str
   if (confirmations.length !== questions.size) throw new ResumeGenerationError("CONFIRMATION_INCOMPLETE", "Confirm each important requirement before generating the resume.");
   for (const confirmation of confirmations) await store.saveResumeConfirmation(userId, confirmation);
   const input = await requiredInputs(userId, generation.jobId);
-  const rematched = matchVacancyAnalysis(generation.analysis, input.profile, [...input.confirmations, ...confirmations]);
-  const allConfirmations = [...input.confirmations, ...confirmations];
+  const allConfirmations = mergeResumeConfirmations(input.confirmations, confirmations);
+  const rematched = matchVacancyAnalysis(generation.analysis, input.profile, allConfirmations);
   const ready = await store.updateResumeGeneration(userId, generation.id, { status: "awaiting_confirmation", analysis: rematched, confirmations: allConfirmations, templateVersion: input.template.version, errorCode: null });
   const result = await finalizeResumeGeneration(userId, ready, { ...input, confirmations: allConfirmations });
   return result.cv;

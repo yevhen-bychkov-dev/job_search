@@ -3,37 +3,53 @@ import "server-only";
 import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput } from "../provider.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse } from "../provider.ts";
 import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
-import { fetchGeminiWithRetry, isGeminiTimeout } from "../gemini-retry.ts";
+import { fetchGeminiWithFallback, isGeminiTimeout } from "../gemini-retry.ts";
 
 export class GeminiCvProvider implements CvAiProvider {
   readonly providerId = "gemini";
-  readonly model: string;
+  private readonly primaryModel: string;
+  private readonly fallbackModel: string | null;
+  private selectedModel: string;
   private readonly apiKey: string;
   private readonly fetchImplementation: typeof fetch;
 
   constructor(
     model: string,
     apiKey: string,
+    fallbackModel: string | null = null,
     fetchImplementation: typeof fetch = fetch,
   ) {
-    this.model = model;
+    this.primaryModel = model;
+    this.fallbackModel = fallbackModel;
+    this.selectedModel = model;
     this.apiKey = apiKey;
     this.fetchImplementation = fetchImplementation;
   }
 
+  get model(): string {
+    return this.selectedModel;
+  }
+
   private async request(body: Record<string, unknown>): Promise<unknown> {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
     let response: Response;
     try {
-      response = await fetchGeminiWithRetry(this.fetchImplementation, endpoint, () => ({
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-goog-api-key": this.apiKey,
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(60_000),
-      }));
+      const result = await fetchGeminiWithFallback(
+        this.fetchImplementation,
+        this.primaryModel,
+        this.fallbackModel,
+        (model) => `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        () => ({
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": this.apiKey,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(60_000),
+        }),
+      );
+      response = result.response;
+      this.selectedModel = result.model;
     } catch (error) {
       if (isGeminiTimeout(error)) throw new CvAiProviderError("GEMINI_TIMEOUT", "Gemini did not respond within 60 seconds.", { cause: error });
       throw new CvAiProviderError("GEMINI_NETWORK_FAILURE", "Gemini request did not complete.", { cause: error });
