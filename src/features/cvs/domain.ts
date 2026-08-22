@@ -414,12 +414,19 @@ export function confirmationQuestions(analysis: VacancyAnalysis): ResumeConfirma
 function containsUnsupportedClaim(text: string, source: string): boolean {
   const normalizedText = normalized(text);
   const normalizedSource = normalized(source);
-  const unsupported = ["managed", "managing", "mentored", "mentoring", "led a team", "team of", "revenue", "customers", "users", "promoted", "award", "organization wide", "cross team"];
+  const unsupported = ["managed", "managing", "manager", "management", "mentored", "mentoring", "led a team", "team of", "revenue", "customers", "users", "promoted", "award", "organization wide", "cross team"];
   return unsupported.some((phrase) => normalizedText.includes(phrase) && !normalizedSource.includes(phrase));
 }
 
 function numbers(value: string): string[] {
   return value.match(/\b\d[\d,.%]*\b/g) ?? [];
+}
+
+function requirementMentioned(requirement: VacancyRequirement, searchable: string): boolean {
+  const label = normalized(requirement.label);
+  if (searchable.includes(label)) return true;
+  const terms = label.split(" ").filter((term) => term.length >= 3);
+  return terms.length > 1 && terms.every((term) => searchable.includes(term));
 }
 
 export function materializeResumeContent(
@@ -461,22 +468,26 @@ export function materializeResumeContent(
       const sourceIds = stringList(bullet.sourceAchievementIds, "resume bullet sources", 10, 64);
       if (!sourceIds.ok || sourceIds.data.length === 0 || !sourceIds.data.every((id) => sourceById.has(id))) return { ok: false, message: "Every resume bullet must cite verified achievements." };
       const sourceText = sourceIds.data.map((id) => sourceById.get(id) ?? "").join(" ");
-      if (containsUnsupportedClaim(bullet.text, sourceText)) return { ok: false, message: "The model introduced an unsupported leadership or impact claim." };
-      if (numbers(bullet.text).some((number) => !sourceText.includes(number))) return { ok: false, message: "The model introduced an unsupported metric." };
+      // A model can produce a valid citation while over-strengthening the
+      // wording. Keep the pipeline resumable and factual by falling back to
+      // the cited Knowledge Base text; the critique stage can still assess the
+      // resulting bullet for quality.
+      const safeBullet = containsUnsupportedClaim(bullet.text, sourceText) || numbers(bullet.text).some((number) => !sourceText.includes(number)) ? sourceText : bullet.text;
       if (/<[a-z][^>]*>/i.test(bullet.text)) return { ok: false, message: "Resume bullets cannot contain HTML." };
-      achievements.push(bullet.text);
+      achievements.push(safeBullet);
     }
     if (achievements.length === 0) return { ok: false, message: "Every selected experience needs at least one verified bullet." };
     experience.push({ company: source.company, role: source.role, startDate: source.startDate, endDate: source.endDate, technologies: [...source.technologies], achievements });
   }
   for (const id of educationIds.data) if (!profile.education.some((education) => education.id === id)) return { ok: false, message: "The model selected education outside the verified profile." };
   const allSourceText = candidateEvidence(profile).join(" ");
-  if (summary && containsUnsupportedClaim(summary, allSourceText)) return { ok: false, message: "The model summary contains an unsupported claim." };
+  const safeHeadline = headline && (containsUnsupportedClaim(headline, allSourceText) || numbers(headline).some((number) => !allSourceText.includes(number))) ? profile.personal.title : headline;
+  const safeSummary = summary && containsUnsupportedClaim(summary, allSourceText) ? profile.summary : summary;
   return {
     ok: true,
     data: {
-      headline: headline ?? profile.personal.title,
-      summary,
+      headline: safeHeadline ?? profile.personal.title,
+      summary: safeSummary,
       skills: verifiedSkills,
       experience,
       education: educationIds.data.map((id) => {
@@ -496,6 +507,6 @@ export function validateResumeRequirementCoverage(
   const requirements = REQUIREMENT_SECTIONS.flatMap((section) => analysis[section])
     .filter((requirement) => requirement.importance === "must_have" && (requirement.status === "supported" || requirement.status === "confirmed_familiar" || confirmed.get(requirement.key)?.level === "commercial" || confirmed.get(requirement.key)?.level === "familiar"));
   const searchable = normalized([content.headline ?? "", content.summary ?? "", ...content.skills, ...content.experience.flatMap((experience) => [experience.role, ...experience.technologies, ...experience.achievements])].join(" "));
-  const missing = requirements.filter((requirement) => !searchable.includes(normalized(requirement.label))).map((requirement) => requirement.label);
+  const missing = requirements.filter((requirement) => !requirementMentioned(requirement, searchable)).map((requirement) => requirement.label);
   return missing.length > 0 ? { ok: false, missing } : { ok: true };
 }

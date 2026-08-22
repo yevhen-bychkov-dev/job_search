@@ -68,7 +68,7 @@ test("job requirements preserve approved levels and support safe manual edits", 
   assert.equal(updated.mustHaveTechnical.find((requirement) => requirement.label === "GraphQL")?.status, "confirmed_familiar");
 });
 
-test("final structured content allows safe senior inference but rejects unsupported claims", () => {
+test("final structured content allows safe senior inference and safely falls back from unsupported claims", () => {
   const candidate = profile();
   const generated = deterministicResume({ job: { title: "Frontend Engineer", company: "Synthetic Co", description: "", technologies: ["React"] }, candidate: candidateProfileForAi(candidate), confirmations: [], analysis: matchVacancyAnalysis(deterministicAnalysis({ job: { title: "Frontend Engineer", company: "Synthetic Co", description: "", technologies: ["React"] }, candidate: candidateProfileForAi(candidate), confirmations: [] }), candidate) });
   const first = generated.experience as Array<{ experienceId: string; bullets: Array<{ text: string; sourceAchievementIds: string[] }> }>;
@@ -76,8 +76,9 @@ test("final structured content allows safe senior inference but rejects unsuppor
   const accepted = materializeResumeContent(candidate, generated);
   assert.equal(accepted.ok, true);
   first[0].bullets[0] = { text: "Managed a team of 8 engineers and increased revenue by 20%.", sourceAchievementIds: ["accessible-design-system"] };
-  const rejected = materializeResumeContent(candidate, generated);
-  assert.equal(rejected.ok, false);
+  const sanitized = materializeResumeContent(candidate, generated);
+  assert.equal(sanitized.ok, true);
+  if (sanitized.ok) assert.equal(sanitized.data.experience[0].achievements[0], "Built accessible shared components used across internal applications.");
 });
 
 test("final structured content drops unsupported model-added skills while preserving verified skills", () => {
@@ -135,6 +136,10 @@ test("Familiar confirmation stays distinct and headline maps to the template tit
   assert.deepEqual(materialized.data.skills, ["React", "Familiar: GraphQL"]);
   const coverage = validateResumeRequirementCoverage({ ...deterministicAnalysis({ job, candidate: candidateProfileForAi(candidate), confirmations: [] }), mustHaveTechnical: [{ key: "react", label: "React", category: "technical", importance: "must_have", status: "supported", evidence: ["React"] }] }, [], materialized.data);
   assert.equal(coverage.ok, true);
+  generated.headline = "Engineering Manager";
+  const headlineFallback = materializeResumeContent(candidate, generated, [{ key: "graphql", label: "GraphQL", level: "familiar", provenance: "explicit_user_confirmation" }]);
+  assert.equal(headlineFallback.ok, true);
+  if (headlineFallback.ok) assert.equal(headlineFallback.data.headline, candidate.personal.title);
 });
 
 test("critique parser rejects unsupported fields and accepts one structured correction review", () => {
