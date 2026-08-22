@@ -134,7 +134,11 @@ function isSchemaRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Convert the app's JSON Schema into Gemini's GenerateContent Schema shape. */
+/**
+ * Convert the app's JSON Schema into Gemini's GenerateContent Schema shape.
+ * Gemini rejects these nested schemas as too complex when array cardinality
+ * hints are included. The application parsers still enforce every array limit.
+ */
 export function geminiResponseSchema(schema: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const rawType = schema.type;
@@ -146,7 +150,7 @@ export function geminiResponseSchema(schema: Record<string, unknown>): Record<st
     if (rawType.includes("null")) result.nullable = true;
   }
 
-  for (const field of ["format", "title", "description", "enum", "maxItems", "minItems", "minLength", "maxLength", "pattern", "minimum", "maximum", "required", "propertyOrdering"]) {
+  for (const field of ["format", "title", "description", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "required", "propertyOrdering"]) {
     if (field in schema) result[field] = schema[field];
   }
   if (isSchemaRecord(schema.items)) result.items = geminiResponseSchema(schema.items);

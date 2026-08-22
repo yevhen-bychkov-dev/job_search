@@ -110,6 +110,18 @@ test("Gemini schema constrains response shape without embedding candidate enums"
   assert.ok(serialized.length < 2_000);
 });
 
+test("Gemini schema conversion omits array limits rejected by GenerateContent", () => {
+  assert.deepEqual(geminiResponseSchema({
+    type: "array",
+    minItems: 1,
+    maxItems: 20,
+    items: { type: "string" },
+  }), {
+    type: "ARRAY",
+    items: { type: "STRING" },
+  });
+});
+
 test("Gemini request includes saved-job context and excludes contact PII", () => {
   const candidate = profile();
   const request = buildGeminiCvRequest({
