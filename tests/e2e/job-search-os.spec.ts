@@ -333,18 +333,16 @@ test("generate immutable CV versions from the verified Candidate Profile", async
   await expect(page.getByRole("heading", { name: "CVs" })).toBeVisible();
   const ownedJobUrl = new URL(page.url()).pathname;
   await expect(page.getByText("No CVs generated for this job yet.")).toBeVisible();
-  await page.getByRole("button", { name: "Generate Resume", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Analyzing vacancy…" })).toBeDisabled();
-  await expect(page.getByRole("heading", { name: "Confirm important vacancy requirements" })).toBeVisible();
-  await page.getByRole("button", { name: "Close requirement confirmation" }).click();
-  await expect(page.getByRole("heading", { name: "Confirm important vacancy requirements" })).toBeHidden();
-  await page.getByRole("button", { name: "Generate Resume", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Confirm important vacancy requirements" })).toBeVisible();
-  await page.locator("fieldset").filter({ hasText: "GraphQL" }).getByLabel("Commercial experience").check();
-  await page.getByRole("button", { name: "Confirm and generate resume" }).click();
+  await page.getByRole("button", { name: "Analyze requirements", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Analyzing requirements…" })).toBeDisabled();
+  await expect(page.locator('input[value="GraphQL"]')).toBeVisible();
+  await page.getByLabel("Experience level for GraphQL").selectOption("commercial");
+  await page.getByRole("button", { name: "Save requirements", exact: true }).click();
+  await expect(page.getByText("Job requirements saved.")).toBeVisible();
+  await page.getByRole("button", { name: "Generate CV", exact: true }).click();
   await expect(page.getByText("Resume #1 generated.")).toBeVisible();
   for (let version = 2; version <= 5; version += 1) {
-    await page.getByRole("button", { name: "Generate Resume", exact: true }).click();
+    await page.getByRole("button", { name: "Generate CV", exact: true }).click();
     await expect(page.getByText(`Resume #${version} generated.`)).toBeVisible();
   }
   await expect(page.locator(".cv-list strong")).toHaveText(["CV #5", "CV #4", "CV #3", "CV #2", "CV #1"]);

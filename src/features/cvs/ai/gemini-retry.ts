@@ -22,9 +22,12 @@ function retryAfterDelay(response: Response): number | null {
 }
 
 function retryDelay(response: Response, retryIndex: number, random: () => number): number | null {
+  // A 429 is returned by Gemini when the quota/rate limit is exhausted. A
+  // retry is another request against the same limit, so leave 429 handling to
+  // the model fallback instead of retrying the same model.
+  if (response.status === 429) return null;
   const retryAfter = retryAfterDelay(response);
   if (retryAfter !== null) return retryAfter;
-  if (response.status === 429) return null;
   const exponentialDelay = BASE_DELAY_MS * (2 ** retryIndex);
   const jitterMultiplier = 0.75 + (random() * 0.5);
   return Math.round(exponentialDelay * jitterMultiplier);
@@ -74,7 +77,8 @@ export async function fetchGeminiWithFallback(
     waitImplementation,
     random,
   );
-  if (primaryResponse.status !== 503 || !fallbackModel || fallbackModel === primaryModel) {
+  const shouldUseFallback = primaryResponse.status === 429 || primaryResponse.status === 503;
+  if (!shouldUseFallback || !fallbackModel || fallbackModel === primaryModel) {
     return { response: primaryResponse, model: primaryModel };
   }
   await primaryResponse.body?.cancel().catch(() => undefined);

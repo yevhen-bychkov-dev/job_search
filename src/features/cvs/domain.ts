@@ -1,10 +1,18 @@
 import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
 
+import {
+  JOB_REQUIREMENT_LEVELS,
+  VACANCY_REQUIREMENT_SECTIONS,
+} from "./types.ts";
 import type {
   CvSelection,
   GeneratedCvContent,
   ResumeConfirmation,
   ResumeConfirmationQuestion,
+  JobRequirementLevel,
+  JobResumeRequirements,
+  SavedJobRequirement,
+  VacancyRequirementSection,
   VacancyAnalysis,
   VacancyRequirement,
 } from "./types";
@@ -148,6 +156,66 @@ const REQUIREMENT_CATEGORIES: VacancyRequirement["category"][] = [
   "technical", "tooling", "architecture", "domain", "responsibility", "collaboration", "leadership",
 ];
 
+export const REQUIREMENT_SECTIONS = VACANCY_REQUIREMENT_SECTIONS;
+
+function statusForRequirementLevel(level: JobRequirementLevel): VacancyRequirement["status"] {
+  if (level === "commercial") return "supported";
+  if (level === "familiar") return "confirmed_familiar";
+  if (level === "none") return "confirmed_none";
+  return "unconfirmed";
+}
+
+function levelForRequirementStatus(status: VacancyRequirement["status"]): JobRequirementLevel {
+  if (status === "supported") return "commercial";
+  if (status === "confirmed_familiar") return "familiar";
+  if (status === "confirmed_none") return "none";
+  return "unconfirmed";
+}
+
+export function savedJobRequirementsFromAnalysis(analysis: VacancyAnalysis): SavedJobRequirement[] {
+  return REQUIREMENT_SECTIONS.flatMap((section) => analysis[section].map((requirement) => ({
+    ...requirement,
+    section,
+    level: levelForRequirementStatus(requirement.status),
+    source: "ai" as const,
+  })));
+}
+
+export function savedJobRequirementsToAnalysis(saved: JobResumeRequirements): VacancyAnalysis {
+  const analysis = structuredClone(saved.analysis);
+  for (const section of REQUIREMENT_SECTIONS) {
+    analysis[section] = saved.requirements
+      .filter((requirement) => requirement.section === section)
+      .map((requirement) => ({ ...requirement, status: statusForRequirementLevel(requirement.level) }));
+  }
+  return analysis;
+}
+
+export function validateSavedJobRequirements(value: unknown): { ok: true; data: SavedJobRequirement[] } | { ok: false; message: string } {
+  if (!Array.isArray(value) || value.length > 80) return { ok: false, message: "The job requirements list is invalid." };
+  const keys = new Set<string>();
+  const result: SavedJobRequirement[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return { ok: false, message: "The job requirements list is invalid." };
+    const key = typeof item.key === "string" ? item.key.trim() : "";
+    const label = typeof item.label === "string" ? item.label.trim() : "";
+    const section = item.section;
+    const category = item.category;
+    const importance = item.importance;
+    const level = item.level;
+    if (!/^[a-z0-9-]{1,120}$/.test(key) || !label || label.length > 160 || !REQUIREMENT_SECTIONS.includes(section as VacancyRequirementSection) || !REQUIREMENT_CATEGORIES.includes(category as VacancyRequirement["category"]) || (importance !== "must_have" && importance !== "nice_to_have") || !JOB_REQUIREMENT_LEVELS.includes(level as JobRequirementLevel)) {
+      return { ok: false, message: "Each job requirement must have a valid label, category, and level." };
+    }
+    if (keys.has(key)) return { ok: false, message: "The job requirements list contains duplicates." };
+    keys.add(key);
+    const evidenceValues = item.evidence;
+    if (!Array.isArray(evidenceValues) || evidenceValues.length > 10 || !evidenceValues.every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= 240)) return { ok: false, message: "requirement evidence is invalid." };
+    const evidence = evidenceValues as string[];
+    result.push({ key, label, section: section as VacancyRequirementSection, category: category as VacancyRequirement["category"], importance, level: level as JobRequirementLevel, source: item.source === "user" ? "user" : "ai", status: statusForRequirementLevel(level as JobRequirementLevel), evidence });
+  }
+  return { ok: true, data: result };
+}
+
 function normalized(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
@@ -161,9 +229,9 @@ function parseRequirement(value: unknown): ParseResult<VacancyRequirement> {
   if (typeof value.category !== "string" || !REQUIREMENT_CATEGORIES.includes(value.category as VacancyRequirement["category"])) return { ok: false, message: "Vacancy requirement category is invalid." };
   if (value.importance !== "must_have" && value.importance !== "nice_to_have") return { ok: false, message: "Vacancy requirement importance is invalid." };
   if (value.status !== "supported" && value.status !== "unconfirmed") return { ok: false, message: "Vacancy requirement status is invalid." };
-  const evidence = stringList(value.evidence, "requirement evidence", 10, 240);
-  if (!evidence.ok) return evidence;
-  return { ok: true, data: { key: value.key, label: value.label, category: value.category as VacancyRequirement["category"], importance: value.importance, status: value.status, evidence: evidence.data } };
+  const evidenceValues = value.evidence;
+  if (!Array.isArray(evidenceValues) || evidenceValues.length > 10 || !evidenceValues.every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= 240)) return { ok: false, message: "requirement evidence is invalid." };
+  return { ok: true, data: { key: value.key, label: value.label, category: value.category as VacancyRequirement["category"], importance: value.importance, status: value.status, evidence: evidenceValues as string[] } };
 }
 
 function parseRequirementList(value: unknown, field: string): ParseResult<VacancyRequirement[]> {

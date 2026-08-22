@@ -262,6 +262,13 @@ tbody tr:hover { background: #fbfcff; }
 .confirmation-fieldset { display: grid; gap: 8px; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
 .confirmation-fieldset legend { padding: 0 5px; font-weight: 700; }
 .confirmation-fieldset label { display: flex; align-items: center; gap: 8px; font-size: .88rem; }
+.job-requirements-editor { display: grid; gap: 14px; padding-top: 8px; border-top: 1px solid var(--line); }
+.job-requirements-list { display: grid; gap: 8px; }
+.job-requirement-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, 260px) auto; gap: 8px; align-items: center; }
+.job-requirement-row input, .job-requirement-row select { width: 100%; }
+.icon-button { display: inline-grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 1.35rem; cursor: pointer; }
+.icon-button:hover, .icon-button:focus-visible { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 700px) { .job-requirement-row { grid-template-columns: 1fr auto; } .job-requirement-row label:first-child { grid-column: 1 / -1; } }
 .cv-empty { padding: 18px 0 4px; color: var(--muted); border-top: 1px solid #eef0f3; }
 .cv-empty p { margin: 0; }
 .cv-list { display: grid; margin: 0; padding: 0; list-style: none; }

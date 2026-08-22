@@ -3,7 +3,7 @@ import "server-only";
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
 import { nextCvVersion } from "@/features/cvs/domain";
-import type { GeneratedCv, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, VacancyAnalysis } from "@/features/cvs/types";
+import type { GeneratedCv, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import { parseCandidateProfileBytes, type CandidateProfile } from "@/features/knowledge/candidate-profile";
@@ -31,6 +31,7 @@ type StoredGeneratedCv = GeneratedCv & {
 
 type StoredTemplate = ResumeTemplate & { userId: string; mimeType: string; bytes: Uint8Array };
 type StoredGeneration = ResumeGeneration & { userId: string };
+type StoredJobResumeRequirements = JobResumeRequirements & { userId: string; jobId: string };
 
 type MemoryState = {
   jobs: Array<Job & { userId: string; duplicateKey: string }>;
@@ -41,6 +42,7 @@ type MemoryState = {
   templates: StoredTemplate[];
   generations: StoredGeneration[];
   confirmations: Array<ResumeConfirmation & { userId: string }>;
+  jobRequirements: StoredJobResumeRequirements[];
   ignoredExternalJobs: Array<{ userId: string; source: string; externalJobId: string }>;
 };
 
@@ -49,7 +51,7 @@ declare global {
 }
 
 function initialState(): MemoryState {
-  return { jobs: [], history: [], filters: new Map(), files: [], generatedCvs: [], templates: [], generations: [], confirmations: [], ignoredExternalJobs: [] };
+  return { jobs: [], history: [], filters: new Map(), files: [], generatedCvs: [], templates: [], generations: [], confirmations: [], jobRequirements: [], ignoredExternalJobs: [] };
 }
 
 function state(): MemoryState {
@@ -410,6 +412,20 @@ export class MemoryAppStore implements AppStore {
     if (existing) Object.assign(existing, structuredClone(confirmation));
     else state().confirmations.push({ userId, ...structuredClone(confirmation) });
     return structuredClone(confirmation);
+  }
+
+  async getJobResumeRequirements(userId: string, jobId: string): Promise<JobResumeRequirements | null> {
+    const found = state().jobRequirements.find((candidate) => candidate.userId === userId && candidate.jobId === jobId);
+    return found ? { analysis: structuredClone(found.analysis), requirements: structuredClone(found.requirements), updatedAt: found.updatedAt } : null;
+  }
+
+  async saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[] }): Promise<JobResumeRequirements> {
+    if (!state().jobs.some((job) => job.userId === userId && job.id === jobId)) throw new ResourceNotFoundError("Job");
+    const updatedAt = new Date().toISOString();
+    const existing = state().jobRequirements.find((candidate) => candidate.userId === userId && candidate.jobId === jobId);
+    if (existing) Object.assign(existing, { analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), updatedAt });
+    else state().jobRequirements.push({ userId, jobId, analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), updatedAt });
+    return { analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), updatedAt };
   }
 
   async createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration> {

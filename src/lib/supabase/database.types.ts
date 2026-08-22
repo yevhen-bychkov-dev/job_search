@@ -201,6 +201,30 @@ export type Database = {
         };
         Relationships: [];
       };
+      job_resume_requirements: {
+        Row: {
+          analysis_json: Json;
+          job_id: string;
+          requirements_json: Json;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          analysis_json: Json;
+          job_id: string;
+          requirements_json: Json;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          analysis_json?: Json;
+          job_id?: string;
+          requirements_json?: Json;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       resume_confirmations: {
         Row: {
           label: string;

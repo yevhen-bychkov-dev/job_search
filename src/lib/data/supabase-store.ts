@@ -3,7 +3,7 @@ import "server-only";
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
 import { nextCvVersion, parseGeneratedCvContent } from "@/features/cvs/domain";
-import type { GeneratedCv, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, VacancyAnalysis } from "@/features/cvs/types";
+import type { GeneratedCv, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import { parseCandidateProfileBytes, type CandidateProfile } from "@/features/knowledge/candidate-profile";
@@ -582,6 +582,21 @@ export class SupabaseAppStore implements AppStore {
       }
     }
     return confirmation;
+  }
+
+  async getJobResumeRequirements(userId: string, jobId: string): Promise<JobResumeRequirements | null> {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase.from("job_resume_requirements").select("analysis_json,requirements_json,updated_at").eq("user_id", userId).eq("job_id", jobId).maybeSingle();
+    if (error) throw new Error(`Unable to load job resume requirements: ${error.message}`);
+    if (!data) return null;
+    return { analysis: data.analysis_json as VacancyAnalysis, requirements: data.requirements_json as SavedJobRequirement[], updatedAt: data.updated_at };
+  }
+
+  async saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[] }): Promise<JobResumeRequirements> {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase.from("job_resume_requirements").upsert({ user_id: userId, job_id: jobId, analysis_json: input.analysis as unknown as Json, requirements_json: input.requirements as unknown as Json }, { onConflict: "job_id" }).select("analysis_json,requirements_json,updated_at").single();
+    if (error) throw new Error(`Unable to save job resume requirements: ${error.message}`);
+    return { analysis: data.analysis_json as VacancyAnalysis, requirements: data.requirements_json as SavedJobRequirement[], updatedAt: data.updated_at };
   }
 
   private toResumeGeneration(row: { id: string; job_id: string; status: ResumeGenerationStatus; idempotency_key: string; analysis_json: Json | null; confirmations_json: Json; error_code: string | null; template_version: number | null; created_at: string; updated_at: string }): ResumeGeneration {

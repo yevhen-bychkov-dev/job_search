@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
-import { confirmationQuestions, matchVacancyAnalysis, materializeResumeContent, parseVacancyAnalysis } from "../../src/features/cvs/domain.ts";
+import { confirmationQuestions, matchVacancyAnalysis, materializeResumeContent, parseVacancyAnalysis, savedJobRequirementsFromAnalysis, savedJobRequirementsToAnalysis, validateSavedJobRequirements } from "../../src/features/cvs/domain.ts";
 import { deterministicAnalysis, deterministicResume } from "../../src/features/cvs/ai/provider.ts";
 import { renderResumeTemplate, validateResumeTemplateText } from "../../src/features/cvs/template.ts";
 
@@ -30,6 +30,20 @@ test("commercial confirmation changes matching, while familiar does not", () => 
   assert.equal(familiar.mustHaveTechnical[0].status, "confirmed_familiar");
   const commercial = matchVacancyAnalysis(parsed.data, profile(), [{ key: "graphql", label: "GraphQL", level: "commercial", provenance: "explicit_user_confirmation" }]);
   assert.equal(commercial.mustHaveTechnical[0].status, "supported");
+});
+
+test("job requirements preserve approved levels and support safe manual edits", () => {
+  const candidate = profile();
+  const analysis = matchVacancyAnalysis(
+    deterministicAnalysis({ job: { title: "Frontend Engineer", company: "Synthetic Co", description: "", technologies: ["React", "GraphQL"] }, candidate: candidateProfileForAi(candidate), confirmations: [] }),
+    candidate,
+  );
+  const requirements = savedJobRequirementsFromAnalysis(analysis);
+  assert.deepEqual(requirements.map((requirement) => [requirement.label, requirement.level]), [["React", "commercial"], ["GraphQL", "unconfirmed"]]);
+  const edited = validateSavedJobRequirements(requirements.map((requirement) => requirement.label === "GraphQL" ? { ...requirement, level: "familiar", evidence: [...requirement.evidence, ...requirement.evidence] } : requirement));
+  if (!edited.ok) assert.fail(edited.message);
+  const updated = savedJobRequirementsToAnalysis({ analysis, requirements: edited.data, updatedAt: new Date().toISOString() });
+  assert.equal(updated.mustHaveTechnical.find((requirement) => requirement.label === "GraphQL")?.status, "confirmed_familiar");
 });
 
 test("final structured content allows safe senior inference but rejects unsupported claims", () => {

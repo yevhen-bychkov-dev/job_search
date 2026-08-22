@@ -7,10 +7,10 @@ import { reportUnexpectedError } from "@/lib/server-errors";
 
 import { createCvAiProvider } from "./ai/factory";
 import { CvAiProviderError } from "./ai/provider";
-import { matchVacancyAnalysis, confirmationQuestions, materializeResumeContent, mergeResumeConfirmations, parseVacancyAnalysis } from "./domain";
+import { matchVacancyAnalysis, materializeResumeContent, parseVacancyAnalysis, savedJobRequirementsFromAnalysis, savedJobRequirementsToAnalysis, validateSavedJobRequirements } from "./domain";
 import { renderHtmlToPdf } from "./html-to-pdf";
 import { renderResumeTemplate, validateResumeTemplateBytes } from "./template";
-import type { GeneratedCv, ResumeConfirmation, ResumeConfirmationLevel, ResumeGeneration, ResumeConfirmationQuestion } from "./types";
+import type { GeneratedCv, JobResumeRequirements, ResumeConfirmationLevel, ResumeGeneration } from "./types";
 
 export class MissingCandidateProfileError extends Error {
   constructor() {
@@ -26,6 +26,13 @@ export class MissingResumeTemplateError extends Error {
   }
 }
 
+export class MissingJobRequirementsError extends Error {
+  constructor() {
+    super("Analyze and save the vacancy requirements before generating a resume.");
+    this.name = "MissingJobRequirementsError";
+  }
+}
+
 export class ResumeGenerationError extends Error {
   readonly code: string;
 
@@ -37,26 +44,62 @@ export class ResumeGenerationError extends Error {
 }
 
 export type BeginResumeGenerationResult =
-  | { kind: "confirmation"; generation: ResumeGeneration; questions: ResumeConfirmationQuestion[] }
   | { kind: "success"; generation: ResumeGeneration; cv: GeneratedCv }
   | { kind: "in_progress"; generation: ResumeGeneration };
+
+function geminiRateLimitMessage(error: CvAiProviderError): string {
+  const cause = error.cause;
+  const details = typeof cause === "object" && cause !== null
+    ? Object.values(cause).filter((value): value is string => typeof value === "string").join(" ").toLocaleLowerCase("en")
+    : "";
+  if (details.includes("quota") || details.includes("resource_exhausted")) {
+    return "Gemini project quota is exhausted (GEMINI_HTTP_429). Check the Gemini project quota/billing or configure a different Gemini project/model.";
+  }
+  return "Gemini rate limit reached (GEMINI_HTTP_429). The app tried one alternate model and stopped to avoid increasing the limit. Please wait and retry.";
+}
+
+function throwGenerationFailure(error: unknown): never {
+  if (error instanceof ResumeGenerationError) throw error;
+  if (error instanceof CvAiProviderError) {
+    reportUnexpectedError("cvs.gemini", error);
+    const message = error.code === "GEMINI_CONFIG_MISSING"
+      ? "Gemini is not configured for this deployment. Add GEMINI_API_KEY and GEMINI_MODEL."
+      : error.code === "GEMINI_HTTP_401" || error.code === "GEMINI_HTTP_403"
+        ? "Gemini rejected the configured API credentials. Check GEMINI_API_KEY."
+        : error.code === "GEMINI_HTTP_429"
+          ? geminiRateLimitMessage(error)
+          : error.code.startsWith("GEMINI_HTTP_5")
+            ? `Gemini is temporarily unavailable after automatic retries (${error.code}). Please retry.`
+            : error.code === "GEMINI_TIMEOUT"
+              ? "Gemini did not respond within 60 seconds (GEMINI_TIMEOUT). Please retry."
+              : error.code === "GEMINI_NETWORK_FAILURE"
+                ? "The Gemini network request failed after automatic retries (GEMINI_NETWORK_FAILURE). Please retry."
+                : `Gemini could not produce structured resume content (${error.code}).`;
+    throw new ResumeGenerationError(error.code, message, { cause: error });
+  }
+  throw new ResumeGenerationError("RESUME_GENERATION_FAILED", "Resume generation failed. Please retry.", { cause: error });
+}
 
 function jobPayload(job: { title: string; company: string; description: string; technologies: string[] }) {
   return { title: job.title, company: job.company, description: job.description, technologies: [...job.technologies] };
 }
 
-async function requiredInputs(userId: string, jobId: string) {
+async function requiredAnalysisInputs(userId: string, jobId: string) {
   const store = getAppStore();
-  const [job, profile, template, confirmations] = await Promise.all([
+  const [job, profile] = await Promise.all([
     store.getJob(userId, jobId),
     store.getCandidateProfile(userId),
-    store.getActiveResumeTemplate(userId),
-    store.listResumeConfirmations(userId),
   ]);
   if (!job) throw new ResourceNotFoundError("Job");
   if (!profile) throw new MissingCandidateProfileError();
+  return { store, job, profile };
+}
+
+async function requiredGenerationInputs(userId: string, jobId: string) {
+  const base = await requiredAnalysisInputs(userId, jobId);
+  const template = await base.store.getActiveResumeTemplate(userId);
   if (!template) throw new MissingResumeTemplateError();
-  return { store, job, profile, template, confirmations };
+  return { ...base, template };
 }
 
 async function failGeneration(userId: string, generation: ResumeGeneration, error: unknown): Promise<never> {
@@ -68,31 +111,13 @@ async function failGeneration(userId: string, generation: ResumeGeneration, erro
     // The original failure remains the actionable error. The store update is best-effort observability.
     reportUnexpectedError("cvs.generation.failure-state", updateError);
   }
-  if (error instanceof ResumeGenerationError) throw error;
-  if (error instanceof CvAiProviderError) {
-    reportUnexpectedError("cvs.gemini", error);
-    const message = error.code === "GEMINI_CONFIG_MISSING"
-      ? "Gemini is not configured for this deployment. Add GEMINI_API_KEY and GEMINI_MODEL."
-      : error.code === "GEMINI_HTTP_401" || error.code === "GEMINI_HTTP_403"
-        ? "Gemini rejected the configured API credentials. Check GEMINI_API_KEY."
-        : error.code === "GEMINI_HTTP_429"
-          ? "Gemini rate limit reached (GEMINI_HTTP_429). Automatic retries were stopped to avoid increasing the limit. Please wait and retry."
-          : error.code.startsWith("GEMINI_HTTP_5")
-            ? `Gemini is temporarily unavailable after automatic retries (${error.code}). Please retry.`
-            : error.code === "GEMINI_TIMEOUT"
-              ? "Gemini did not respond within 60 seconds (GEMINI_TIMEOUT). Please retry."
-              : error.code === "GEMINI_NETWORK_FAILURE"
-                ? "The Gemini network request failed after automatic retries (GEMINI_NETWORK_FAILURE). Please retry."
-            : `Gemini could not produce structured resume content (${error.code}).`;
-    throw new ResumeGenerationError(error.code, message, { cause: error });
-  }
-  throw new ResumeGenerationError(code, "Resume generation failed. Please retry.", { cause: error });
+  return throwGenerationFailure(error);
 }
 
 async function finalizeResumeGeneration(
   userId: string,
   generation: ResumeGeneration,
-  input: Awaited<ReturnType<typeof requiredInputs>>,
+  input: Awaited<ReturnType<typeof requiredGenerationInputs>>,
 ): Promise<{ generation: ResumeGeneration; cv: GeneratedCv }> {
   const { store, job, profile, template } = input;
   if (!generation.analysis) throw new ResumeGenerationError("ANALYSIS_MISSING", "Resume requirement analysis is missing.");
@@ -128,47 +153,43 @@ async function finalizeResumeGeneration(
 }
 
 export async function beginResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<BeginResumeGenerationResult> {
-  const input = await requiredInputs(userId, jobId);
+  const input = await requiredGenerationInputs(userId, jobId);
+  const savedRequirements = await input.store.getJobResumeRequirements(userId, jobId);
+  if (!savedRequirements) throw new MissingJobRequirementsError();
   const generation = await input.store.createResumeGeneration(userId, jobId, idempotencyKey);
   if (generation.status === "completed") {
     const existing = (await input.store.listGeneratedCvs(userId, jobId)).find((cv) => cv.generationId === generation.id);
     if (existing) return { kind: "success", generation, cv: existing };
   }
-  if (generation.status === "awaiting_confirmation" && generation.analysis) return { kind: "confirmation", generation, questions: confirmationQuestions(generation.analysis) };
   if (generation.status === "generating" || generation.status === "rendering") return { kind: "in_progress", generation };
-  let analyzed = generation;
-  try {
-    const provider = createCvAiProvider();
-    const untrustedAnalysis = await provider.analyzeVacancy({ job: jobPayload(input.job), candidate: candidateProfileForAi(input.profile), confirmations: input.confirmations });
-    const parsed = parseVacancyAnalysis(untrustedAnalysis);
-    if (!parsed.ok) throw new ResumeGenerationError("VACANCY_ANALYSIS_REJECTED", `Vacancy analysis was rejected: ${parsed.message}`);
-    const matched = matchVacancyAnalysis(parsed.data, input.profile, input.confirmations);
-    analyzed = await input.store.updateResumeGeneration(userId, generation.id, { status: "awaiting_confirmation", analysis: matched, confirmations: input.confirmations, templateVersion: input.template.version, errorCode: null });
-  } catch (error) {
-    return failGeneration(userId, generation, error);
-  }
-  const questions = confirmationQuestions(analyzed.analysis ?? { mustHaveTechnical: [], niceToHaveTechnical: [], tooling: [], architecture: [], domainKnowledge: [], responsibilities: [], ownershipExpectations: [], senioritySignals: [], collaborationExpectations: [], leadershipExpectations: [], atsKeywords: [], employerTerminology: [] });
-  if (questions.length > 0) return { kind: "confirmation", generation: analyzed, questions };
-  return finalizeResumeGeneration(userId, analyzed, input).then(({ generation: completed, cv }) => ({ kind: "success" as const, generation: completed, cv }));
+  const analysis = savedJobRequirementsToAnalysis(savedRequirements);
+  const confirmations = savedRequirements.requirements
+    .filter((requirement) => requirement.level !== "unconfirmed")
+    .map((requirement) => ({ key: requirement.key, label: requirement.label, level: requirement.level as ResumeConfirmationLevel, provenance: requirement.source === "ai" ? "existing_kb" as const : "explicit_user_confirmation" as const }));
+  const ready = await input.store.updateResumeGeneration(userId, generation.id, { status: "awaiting_confirmation", analysis, confirmations, templateVersion: input.template.version, errorCode: null });
+  return finalizeResumeGeneration(userId, ready, input).then(({ generation: completed, cv }) => ({ kind: "success" as const, generation: completed, cv }));
 }
 
-export async function confirmAndGenerateResume(userId: string, generationId: string, answers: Array<{ key: string; level: ResumeConfirmationLevel }>): Promise<GeneratedCv> {
-  const store = getAppStore();
-  const generation = await store.getResumeGeneration(userId, generationId);
-  if (!generation || !generation.analysis) throw new ResourceNotFoundError("Resume generation");
-  const questions = new Map(confirmationQuestions(generation.analysis).map((question) => [question.key, question]));
-  const confirmations: ResumeConfirmation[] = [];
-  for (const answer of answers) {
-    const question = questions.get(answer.key);
-    if (!question || !["commercial", "familiar", "none"].includes(answer.level)) throw new ResumeGenerationError("CONFIRMATION_INVALID", "The confirmation answers are invalid.");
-    confirmations.push({ key: question.key, label: question.label, level: answer.level, provenance: "explicit_user_confirmation" });
+export async function analyzeJobRequirements(userId: string, jobId: string): Promise<JobResumeRequirements> {
+  const input = await requiredAnalysisInputs(userId, jobId);
+  try {
+    const provider = createCvAiProvider();
+    const untrustedAnalysis = await provider.analyzeVacancy({ job: jobPayload(input.job), candidate: candidateProfileForAi(input.profile), confirmations: [] });
+    const parsed = parseVacancyAnalysis(untrustedAnalysis);
+    if (!parsed.ok) throw new ResumeGenerationError("VACANCY_ANALYSIS_REJECTED", `Vacancy analysis was rejected: ${parsed.message}`);
+    const analysis = matchVacancyAnalysis(parsed.data, input.profile, []);
+    return { analysis, requirements: savedJobRequirementsFromAnalysis(analysis), updatedAt: new Date().toISOString() };
+  } catch (error) {
+    return throwGenerationFailure(error);
   }
-  if (confirmations.length !== questions.size) throw new ResumeGenerationError("CONFIRMATION_INCOMPLETE", "Confirm each important requirement before generating the resume.");
-  for (const confirmation of confirmations) await store.saveResumeConfirmation(userId, confirmation);
-  const input = await requiredInputs(userId, generation.jobId);
-  const allConfirmations = mergeResumeConfirmations(input.confirmations, confirmations);
-  const rematched = matchVacancyAnalysis(generation.analysis, input.profile, allConfirmations);
-  const ready = await store.updateResumeGeneration(userId, generation.id, { status: "awaiting_confirmation", analysis: rematched, confirmations: allConfirmations, templateVersion: input.template.version, errorCode: null });
-  const result = await finalizeResumeGeneration(userId, ready, { ...input, confirmations: allConfirmations });
-  return result.cv;
+}
+
+export async function saveJobRequirements(userId: string, jobId: string, rawAnalysis: unknown, rawRequirements: unknown): Promise<JobResumeRequirements> {
+  const store = getAppStore();
+  if (!(await store.getJob(userId, jobId))) throw new ResourceNotFoundError("Job");
+  const parsedAnalysis = parseVacancyAnalysis(rawAnalysis);
+  if (!parsedAnalysis.ok) throw new ResumeGenerationError("JOB_REQUIREMENTS_INVALID", parsedAnalysis.message);
+  const parsed = validateSavedJobRequirements(rawRequirements);
+  if (!parsed.ok) throw new ResumeGenerationError("JOB_REQUIREMENTS_INVALID", parsed.message);
+  return store.saveJobResumeRequirements(userId, jobId, { analysis: savedJobRequirementsToAnalysis({ analysis: parsedAnalysis.data, requirements: parsed.data, updatedAt: new Date().toISOString() }), requirements: parsed.data });
 }

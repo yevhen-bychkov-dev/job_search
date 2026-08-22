@@ -304,6 +304,13 @@ select lives_ok(
 );
 select is((select count(*) from public.resume_confirmations), 1::bigint, 'user A can read resume confirmations');
 select lives_ok(
+  $$insert into public.job_resume_requirements (job_id, user_id, analysis_json, requirements_json)
+    values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111', '{"mustHaveTechnical":[]}'::jsonb, '[{"key":"graphql","label":"GraphQL","level":"commercial"}]'::jsonb)$$,
+  'user A can save requirements for an owned job'
+);
+select is((select count(*) from public.job_resume_requirements), 1::bigint, 'user A can read job requirements');
+select is((with changed as (update public.job_resume_requirements set requirements_json = '[]'::jsonb returning *) select count(*) from changed), 1::bigint, 'user A can edit owned job requirements');
+select lives_ok(
   $$insert into public.resume_generations (id, user_id, job_id, status, idempotency_key, analysis_json, confirmations_json, template_version)
     values ('ffffffff-ffff-4fff-8fff-ffffffffffff', '11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'analyzing', 'synthetic-idempotency-1', '{}'::jsonb, '[]'::jsonb, 1)$$,
   'user A can create an owned resume generation'
@@ -314,6 +321,7 @@ select is((with changed as (update public.resume_generations set status = 'await
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 select is((select count(*) from public.resume_templates), 0::bigint, 'user B cannot read user A templates');
 select is((select count(*) from public.resume_confirmations), 0::bigint, 'user B cannot read user A confirmations');
+select is((select count(*) from public.job_resume_requirements), 0::bigint, 'user B cannot read user A job requirements');
 select is((select count(*) from public.resume_generations), 0::bigint, 'user B cannot read user A generation state');
 select throws_ok(
   $$insert into public.resume_templates (user_id, object_path, original_name, size_bytes, version, active)
@@ -324,6 +332,11 @@ select throws_ok(
   $$insert into public.resume_generations (user_id, job_id, idempotency_key)
     values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'stolen-generation-key')$$,
   '42501', null, 'user B cannot create a generation for user A'
+);
+select throws_ok(
+  $$insert into public.job_resume_requirements (job_id, user_id, analysis_json, requirements_json)
+    values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111', '{}'::jsonb, '[]'::jsonb)$$,
+  '42501', null, 'user B cannot create job requirements for user A'
 );
 
 set local role anon;
@@ -336,6 +349,7 @@ select is((select count(*) from public.ignored_external_jobs), 0::bigint, 'anony
 select is((select count(*) from public.generated_cvs), 0::bigint, 'anonymous users cannot read generated CVs');
 select is((select count(*) from public.resume_templates), 0::bigint, 'anonymous users cannot read resume templates');
 select is((select count(*) from public.resume_confirmations), 0::bigint, 'anonymous users cannot read resume confirmations');
+select is((select count(*) from public.job_resume_requirements), 0::bigint, 'anonymous users cannot read job requirements');
 select is((select count(*) from public.resume_generations), 0::bigint, 'anonymous users cannot read resume generations');
 select throws_ok(
   $$insert into public.jobs (user_id, title, company, discovered_on, dedupe_key)
@@ -356,6 +370,13 @@ select throws_ok(
   '42501',
   null,
   'anonymous users cannot create ignored identities'
+);
+select throws_ok(
+  $$insert into public.job_resume_requirements (job_id, user_id, analysis_json, requirements_json)
+    values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111', '{}'::jsonb, '[]'::jsonb)$$,
+  '42501',
+  null,
+  'anonymous users cannot create job requirements'
 );
 select throws_ok(
   $$insert into public.knowledge_files (user_id, object_path, original_name, mime_type, size_bytes)

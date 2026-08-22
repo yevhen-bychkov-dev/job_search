@@ -54,7 +54,26 @@ export class GeminiCvProvider implements CvAiProvider {
       if (isGeminiTimeout(error)) throw new CvAiProviderError("GEMINI_TIMEOUT", "Gemini did not respond within 60 seconds.", { cause: error });
       throw new CvAiProviderError("GEMINI_NETWORK_FAILURE", "Gemini request did not complete.", { cause: error });
     }
-    if (!response.ok) throw new CvAiProviderError(`GEMINI_HTTP_${response.status}`, `Gemini request failed with HTTP ${response.status}.`);
+    if (!response.ok) {
+      let providerStatus: string | undefined;
+      let providerMessage: string | undefined;
+      try {
+        const payload: unknown = await response.clone().json();
+        if (typeof payload === "object" && payload !== null && "error" in payload) {
+          const error = payload.error;
+          if (typeof error === "object" && error !== null) {
+            if ("status" in error && typeof error.status === "string") providerStatus = error.status;
+            if ("message" in error && typeof error.message === "string") providerMessage = error.message;
+          }
+        }
+      } catch {
+        // The HTTP status remains the reliable error signal when the provider
+        // returns a non-JSON error body.
+      }
+      throw new CvAiProviderError(`GEMINI_HTTP_${response.status}`, `Gemini request failed with HTTP ${response.status}.`, {
+        cause: { providerStatus, providerMessage },
+      });
+    }
     return extractGeminiStructuredResponse(await response.json() as unknown);
   }
 

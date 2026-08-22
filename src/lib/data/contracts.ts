@@ -1,5 +1,5 @@
 import type { FilterSettings } from "@/features/filters/types";
-import type { GeneratedCv, GeneratedCvContent, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, VacancyAnalysis } from "@/features/cvs/types";
+import type { GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
 import type { KnowledgeDocumentKind, KnowledgeFile } from "@/features/knowledge/types";
@@ -87,6 +87,8 @@ export interface AppStore {
   downloadResumeTemplate(userId: string, id: string): Promise<StoredResumeTemplate>;
   listResumeConfirmations(userId: string): Promise<ResumeConfirmation[]>;
   saveResumeConfirmation(userId: string, confirmation: ResumeConfirmation): Promise<ResumeConfirmation>;
+  getJobResumeRequirements(userId: string, jobId: string): Promise<JobResumeRequirements | null>;
+  saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[] }): Promise<JobResumeRequirements>;
   createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration>;
   getResumeGeneration(userId: string, id: string): Promise<ResumeGeneration | null>;
   getLatestResumeGeneration(userId: string, jobId: string): Promise<ResumeGeneration | null>;

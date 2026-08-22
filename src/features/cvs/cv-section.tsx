@@ -2,10 +2,11 @@ import Link from "next/link";
 
 import { formatDateTimeInTimeZone } from "@/features/jobs/domain";
 
-import type { GeneratedCv, ResumeGeneration } from "./types";
+import type { GeneratedCv, JobResumeRequirements, ResumeGeneration } from "./types";
 import { GenerateCvForm } from "./generate-cv-form";
+import { JobRequirementsEditor } from "./job-requirements-editor";
 
-export function CvSection({ jobId, cvs, hasCandidateProfile, hasResumeTemplate, latestGeneration }: { jobId: string; cvs: GeneratedCv[]; hasCandidateProfile: boolean; hasResumeTemplate: boolean; latestGeneration: ResumeGeneration | null }) {
+export function CvSection({ jobId, cvs, hasCandidateProfile, hasResumeTemplate, latestGeneration, jobRequirements }: { jobId: string; cvs: GeneratedCv[]; hasCandidateProfile: boolean; hasResumeTemplate: boolean; latestGeneration: ResumeGeneration | null; jobRequirements: JobResumeRequirements | null }) {
   return (
     <article className="card stack" aria-labelledby="cvs-heading">
       <div className="section-heading">
@@ -13,7 +14,9 @@ export function CvSection({ jobId, cvs, hasCandidateProfile, hasResumeTemplate, 
         <span className="count-pill">{cvs.length}</span>
       </div>
       {!hasResumeTemplate ? <div className="alert alert-error" role="alert">Configure an HTML Resume Template in <Link href="/account">Account</Link> before generating a resume.</div> : null}
-      {hasResumeTemplate && hasCandidateProfile ? <GenerateCvForm jobId={jobId} /> : null}
+      {hasCandidateProfile ? <JobRequirementsEditor jobId={jobId} initialAnalysis={jobRequirements?.analysis ?? null} initialRequirements={jobRequirements?.requirements ?? []} canAnalyze={hasCandidateProfile} /> : null}
+      {hasResumeTemplate && hasCandidateProfile ? <GenerateCvForm jobId={jobId} hasRequirements={Boolean(jobRequirements?.requirements.length)} /> : null}
+      {hasCandidateProfile && !jobRequirements?.requirements.length ? <p className="alert alert-info" role="status">Save the job requirements before generating a CV.</p> : null}
       {!hasCandidateProfile ? <div className="alert alert-error" role="alert">Add a validated Candidate Profile JSON in the <Link href="/knowledge-base">Knowledge Base</Link> before generating a resume.</div> : null}
       {latestGeneration && latestGeneration.status !== "completed" && latestGeneration.status !== "failed" && latestGeneration.status !== "cancelled" ? <p className="alert alert-info" role="status">Resume generation is {latestGeneration.status.replaceAll("_", " ")}. You can leave this page; completed resumes will appear here when you return.</p> : null}
       {latestGeneration?.status === "failed" ? <p className="alert alert-error" role="alert">The last resume generation failed. You can retry after correcting the issue.</p> : null}

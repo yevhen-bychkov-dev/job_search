@@ -52,6 +52,8 @@ export type ResumeGenerationStatus = (typeof RESUME_GENERATION_STATUSES)[number]
 
 export const RESUME_CONFIRMATION_LEVELS = ["commercial", "familiar", "none"] as const;
 export type ResumeConfirmationLevel = (typeof RESUME_CONFIRMATION_LEVELS)[number];
+export const JOB_REQUIREMENT_LEVELS = ["unconfirmed", ...RESUME_CONFIRMATION_LEVELS] as const;
+export type JobRequirementLevel = (typeof JOB_REQUIREMENT_LEVELS)[number];
 
 export type VacancyRequirement = {
   key: string;
@@ -91,6 +93,31 @@ export type ResumeConfirmationQuestion = {
   importance: VacancyRequirement["importance"];
 };
 
+export const VACANCY_REQUIREMENT_SECTIONS = [
+  "mustHaveTechnical",
+  "niceToHaveTechnical",
+  "tooling",
+  "architecture",
+  "domainKnowledge",
+  "responsibilities",
+  "ownershipExpectations",
+  "collaborationExpectations",
+  "leadershipExpectations",
+] as const;
+export type VacancyRequirementSection = (typeof VACANCY_REQUIREMENT_SECTIONS)[number];
+
+export type SavedJobRequirement = VacancyRequirement & {
+  section: VacancyRequirementSection;
+  level: JobRequirementLevel;
+  source: "ai" | "user";
+};
+
+export type JobResumeRequirements = {
+  analysis: VacancyAnalysis;
+  requirements: SavedJobRequirement[];
+  updatedAt: string;
+};
+
 export type ResumeGeneration = {
   id: string;
   jobId: string;
@@ -111,7 +138,15 @@ export type CvActionState = {
   questions?: ResumeConfirmationQuestion[];
 };
 
+export type RequirementsActionState = {
+  status: "idle" | "success" | "error";
+  message: string;
+  requirements?: SavedJobRequirement[];
+  analysis?: VacancyAnalysis;
+};
+
 export const INITIAL_CV_ACTION_STATE: CvActionState = { status: "idle", message: "" };
+export const INITIAL_REQUIREMENTS_ACTION_STATE: RequirementsActionState = { status: "idle", message: "" };
 
 export type CvRenderInput = {
   personal: CandidateProfile["personal"];

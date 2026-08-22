@@ -152,7 +152,7 @@ test("Gemini retries transient HTTP failures and not permanent request errors", 
 
   let rateLimitAttempts = 0;
   const rateLimited = await fetchGeminiWithRetry(
-    async () => { rateLimitAttempts += 1; return new Response("{}", { status: 429 }); },
+    async () => { rateLimitAttempts += 1; return new Response("{}", { status: 429, headers: { "retry-after": "1" } }); },
     "https://example.test/gemini",
     () => ({ method: "POST" }),
   );
@@ -194,6 +194,24 @@ test("Gemini falls back only after persistent primary-model 503 responses", asyn
   assert.equal(permanent.response.status, 400);
   assert.equal(permanent.model, "gemini-3.7-flash");
   assert.equal(fallbackCalls, 1);
+
+  const rateLimitEndpoints: string[] = [];
+  const rateLimited = await fetchGeminiWithFallback(
+    async (endpoint) => {
+      rateLimitEndpoints.push(String(endpoint));
+      return new Response("{}", { status: rateLimitEndpoints.length === 1 ? 429 : 200 });
+    },
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    (model) => `https://example.test/${model}`,
+    () => ({ method: "POST" }),
+  );
+  assert.equal(rateLimited.response.status, 200);
+  assert.equal(rateLimited.model, "gemini-3.6-flash");
+  assert.deepEqual(rateLimitEndpoints, [
+    "https://example.test/gemini-3.7-flash",
+    "https://example.test/gemini-3.6-flash",
+  ]);
 });
 
 test("resume confirmations are deduplicated with the newest explicit answer winning", () => {

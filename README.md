@@ -66,13 +66,13 @@ External job boards are isolated behind a common adapter boundary, allowing addi
 
 The resume generation flow is intentionally designed to reduce hallucinations while producing strong professional framing.
 
-The application maintains a validated **Candidate Profile** as the factual source of truth, then runs a durable Vacancy → Requirement Analysis → Knowledge Base Matching → User Confirmation → ResumeContent → HTML Template → PDF workflow.
+The application maintains a validated **Candidate Profile** as the factual source of truth and separates CV work into two stages. First, Gemini analyzes a vacancy and the user edits, approves, adds, or removes requirements in the job card; that requirement set is saved per job. Later CV generations reuse that saved set and do not re-run vacancy analysis. The final stage sends the saved vacancy, requirements, verified profile, and selected experience levels to Gemini for structured ResumeContent, followed by HTML template rendering and PDF generation.
 
 Before either AI request, personal contact information is removed. Gemini first analyzes the vacancy and then returns structured ResumeContent. Each final bullet cites source achievement IDs, so the server can allow safe senior inference such as framing a verified end-to-end build as designed and implemented while rejecting unsupported leadership, metrics, or impact claims. Missing evidence is unconfirmed, not “no experience”; only material unknowns are shown for confirmation.
 
 The application validates the structured content against the original profile, inserts it into the user's validated HTML template, and generates the PDF with Chromium. Personal contact details are injected during trusted template rendering.
 
-This means the model does not control contact details, arbitrary work history, HTML, CSS, or the final PDF layout.
+This means the model does not control contact details, arbitrary work history, HTML, CSS, or the final PDF layout. A job’s saved requirements are reusable input for every later CV version for that job.
 
 Each completed resume is stored as an immutable version associated with the corresponding job. Incomplete and failed generation attempts remain lifecycle records and never appear in normal resume history.
 
