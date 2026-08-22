@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { CvAiProviderError, extractGeminiStructuredResponse, geminiResponseSchema, selectionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
 import { buildGeminiCvRequest } from "../../src/features/cvs/ai/gemini-request.ts";
+import { fetchGeminiWithRetry, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
 import { materializeGeneratedCv, nextCvVersion, parseCvSelection, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
 import { renderCvPdf } from "../../src/features/cvs/pdf.ts";
@@ -120,6 +121,33 @@ test("Gemini schema conversion omits array limits rejected by GenerateContent", 
     type: "ARRAY",
     items: { type: "STRING" },
   });
+});
+
+test("Gemini retries transient HTTP failures and not permanent request errors", async () => {
+  assert.equal(isRetryableGeminiStatus(408), true);
+  assert.equal(isRetryableGeminiStatus(429), true);
+  assert.equal(isRetryableGeminiStatus(503), true);
+  assert.equal(isRetryableGeminiStatus(400), false);
+
+  const statuses = [503, 503, 200];
+  const delays: number[] = [];
+  const response = await fetchGeminiWithRetry(
+    async () => new Response("{}", { status: statuses.shift() ?? 500 }),
+    "https://example.test/gemini",
+    () => ({ method: "POST" }),
+    async (milliseconds) => { delays.push(milliseconds); },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(delays, [500, 1_000]);
+
+  let permanentAttempts = 0;
+  const permanent = await fetchGeminiWithRetry(
+    async () => { permanentAttempts += 1; return new Response("{}", { status: 400 }); },
+    "https://example.test/gemini",
+    () => ({ method: "POST" }),
+  );
+  assert.equal(permanent.status, 400);
+  assert.equal(permanentAttempts, 1);
 });
 
 test("Gemini request includes saved-job context and excludes contact PII", () => {

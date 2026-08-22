@@ -70,14 +70,19 @@ async function failGeneration(userId: string, generation: ResumeGeneration, erro
   }
   if (error instanceof ResumeGenerationError) throw error;
   if (error instanceof CvAiProviderError) {
+    reportUnexpectedError("cvs.gemini", error);
     const message = error.code === "GEMINI_CONFIG_MISSING"
       ? "Gemini is not configured for this deployment. Add GEMINI_API_KEY and GEMINI_MODEL."
       : error.code === "GEMINI_HTTP_401" || error.code === "GEMINI_HTTP_403"
         ? "Gemini rejected the configured API credentials. Check GEMINI_API_KEY."
         : error.code === "GEMINI_HTTP_429"
-          ? "Gemini rate limit reached. Please wait and retry."
-          : error.code.startsWith("GEMINI_HTTP_5") || error.code === "GEMINI_NETWORK_FAILURE"
-            ? "Gemini is temporarily unavailable. Please retry."
+          ? "Gemini rate limit reached after automatic retries (GEMINI_HTTP_429). Please wait and retry."
+          : error.code.startsWith("GEMINI_HTTP_5")
+            ? `Gemini is temporarily unavailable after automatic retries (${error.code}). Please retry.`
+            : error.code === "GEMINI_TIMEOUT"
+              ? "Gemini did not respond within 60 seconds (GEMINI_TIMEOUT). Please retry."
+              : error.code === "GEMINI_NETWORK_FAILURE"
+                ? "The Gemini network request failed after automatic retries (GEMINI_NETWORK_FAILURE). Please retry."
             : `Gemini could not produce structured resume content (${error.code}).`;
     throw new ResumeGenerationError(error.code, message, { cause: error });
   }

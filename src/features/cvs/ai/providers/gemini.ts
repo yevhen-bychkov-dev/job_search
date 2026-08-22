@@ -3,6 +3,7 @@ import "server-only";
 import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput } from "../provider.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse } from "../provider.ts";
 import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
+import { fetchGeminiWithRetry, isGeminiTimeout } from "../gemini-retry.ts";
 
 export class GeminiCvProvider implements CvAiProvider {
   readonly providerId = "gemini";
@@ -24,7 +25,7 @@ export class GeminiCvProvider implements CvAiProvider {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
     let response: Response;
     try {
-      response = await this.fetchImplementation(endpoint, {
+      response = await fetchGeminiWithRetry(this.fetchImplementation, endpoint, () => ({
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -32,8 +33,9 @@ export class GeminiCvProvider implements CvAiProvider {
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(60_000),
-      });
+      }));
     } catch (error) {
+      if (isGeminiTimeout(error)) throw new CvAiProviderError("GEMINI_TIMEOUT", "Gemini did not respond within 60 seconds.", { cause: error });
       throw new CvAiProviderError("GEMINI_NETWORK_FAILURE", "Gemini request did not complete.", { cause: error });
     }
     if (!response.ok) throw new CvAiProviderError(`GEMINI_HTTP_${response.status}`, `Gemini request failed with HTTP ${response.status}.`);
