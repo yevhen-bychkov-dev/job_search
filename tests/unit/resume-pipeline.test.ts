@@ -44,6 +44,15 @@ test("final structured content allows safe senior inference but rejects unsuppor
   assert.equal(rejected.ok, false);
 });
 
+test("final structured content drops unsupported model-added skills while preserving verified skills", () => {
+  const candidate = profile();
+  const generated = deterministicResume({ job: { title: "Frontend Engineer", company: "Synthetic Co", description: "", technologies: ["React"] }, candidate: candidateProfileForAi(candidate), confirmations: [], analysis: matchVacancyAnalysis(deterministicAnalysis({ job: { title: "Frontend Engineer", company: "Synthetic Co", description: "", technologies: ["React"] }, candidate: candidateProfileForAi(candidate), confirmations: [] }), candidate) });
+  generated.skills = ["React", "Invented Platform"];
+  const materialized = materializeResumeContent(candidate, generated);
+  assert.equal(materialized.ok, true);
+  if (materialized.ok) assert.deepEqual(materialized.data.skills, ["React"]);
+});
+
 test("resume templates reject executable content and render escaped data", () => {
   assert.match(validateResumeTemplateText("<html><body><script>bad()</script>{{resume.name}}{{resume.experience}}</body></html>"), /scripts/);
   const normalMeta = "<html><head><meta name=\"viewport\" content=\"width=device-width\"></head><body>{{resume.name}}{{resume.experience}}</body></html>";

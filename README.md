@@ -141,7 +141,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Configure the required Supabase environment values and Gemini API key in `.env.local`.
+Configure the required Supabase environment values and Gemini API key in `.env.local`. When `GEMINI_MODEL=gemini-3.7-flash`, persistent capacity-related HTTP 503 responses automatically fall back to `gemini-3.6-flash`; set `GEMINI_FALLBACK_MODEL` to override that server-only fallback.
 
 To test the application locally without Supabase, Docker, external credentials, or real data, run:
 

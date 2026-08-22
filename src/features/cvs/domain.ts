@@ -295,7 +295,7 @@ export function materializeResumeContent(
   const educationIds = stringList(value.educationIds, "resume education", 20, 64);
   if (!skills.ok) return skills;
   if (!educationIds.ok) return educationIds;
-  if (!skills.data.every((skill) => allowedSkills.has(normalized(skill)))) return { ok: false, message: "The model added a skill without verified support." };
+  const verifiedSkills = skills.data.filter((skill) => allowedSkills.has(normalized(skill)));
   if (!Array.isArray(value.experience) || value.experience.length < 1 || value.experience.length > profile.experience.length) return { ok: false, message: "The model experience selection is invalid." };
   const experienceById = new Map(profile.experience.map((experience) => [experience.id, experience]));
   const selected = new Set<string>();
@@ -328,7 +328,7 @@ export function materializeResumeContent(
     data: {
       headline,
       summary,
-      skills: skills.data,
+      skills: verifiedSkills,
       experience,
       education: educationIds.data.map((id) => {
         const education = profile.education.find((candidate) => candidate.id === id);
