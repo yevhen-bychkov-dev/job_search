@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CvAiProviderError, extractGeminiStructuredResponse, selectionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
+import { CvAiProviderError, extractGeminiStructuredResponse, geminiResponseSchema, selectionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
 import { buildGeminiCvRequest } from "../../src/features/cvs/ai/gemini-request.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
 import { materializeGeneratedCv, nextCvVersion, parseCvSelection, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
@@ -130,7 +130,7 @@ test("Gemini request includes saved-job context and excludes contact PII", () =>
   assert.match(serialized, /application\/json/);
   const generationConfig = request.generationConfig as Record<string, unknown>;
   assert.equal(generationConfig.responseMimeType, "application/json");
-  assert.deepEqual(generationConfig.responseSchema, selectionJsonSchema({
+  assert.deepEqual(generationConfig.responseSchema, geminiResponseSchema(selectionJsonSchema({
     job: {
       title: "Frontend Engineer",
       company: "Synthetic Hiring Co",
@@ -138,7 +138,7 @@ test("Gemini request includes saved-job context and excludes contact PII", () =>
       technologies: ["React", "TypeScript"],
     },
     candidate: candidateProfileForAi(candidate),
-  }));
+  })));
   assert.equal("responseFormat" in generationConfig, false);
   assert.doesNotMatch(serialized, /Alex Example/);
   assert.doesNotMatch(serialized, /alex@example\.test/i);

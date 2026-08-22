@@ -130,6 +130,37 @@ export function selectionJsonSchema(input: { candidate: CandidateProfileForAi; j
   };
 }
 
+function isSchemaRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Convert the app's JSON Schema into Gemini's GenerateContent Schema shape. */
+export function geminiResponseSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  const rawType = schema.type;
+  if (typeof rawType === "string") {
+    result.type = rawType.toUpperCase();
+  } else if (Array.isArray(rawType)) {
+    const nonNullType = rawType.find((type): type is string => typeof type === "string" && type !== "null");
+    result.type = (nonNullType ?? "null").toUpperCase();
+    if (rawType.includes("null")) result.nullable = true;
+  }
+
+  for (const field of ["format", "title", "description", "enum", "maxItems", "minItems", "minLength", "maxLength", "pattern", "minimum", "maximum", "required", "propertyOrdering"]) {
+    if (field in schema) result[field] = schema[field];
+  }
+  if (isSchemaRecord(schema.items)) result.items = geminiResponseSchema(schema.items);
+  if (isSchemaRecord(schema.properties)) {
+    const properties: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(schema.properties)) {
+      if (isSchemaRecord(value)) properties[key] = geminiResponseSchema(value);
+    }
+    result.properties = properties;
+  }
+  if (Array.isArray(schema.anyOf)) result.anyOf = schema.anyOf.filter(isSchemaRecord).map((item) => geminiResponseSchema(item));
+  return result;
+}
+
 export function deterministicSelection(input: { candidate: CandidateProfileForAi; job?: VacancyAiJob }): CvSelection {
   return { includeSummary: Boolean(input.candidate.summary), skillOrder: [...input.candidate.skills], experience: input.candidate.experience.map((experience) => ({ experienceId: experience.id, achievementIds: experience.achievements.map((achievement) => achievement.id) })), educationIds: input.candidate.education.map((education) => education.id) };
 }
