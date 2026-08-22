@@ -157,6 +157,7 @@ const REQUIREMENT_CATEGORIES: VacancyRequirement["category"][] = [
 ];
 
 export const REQUIREMENT_SECTIONS = VACANCY_REQUIREMENT_SECTIONS;
+const MAX_REQUIREMENT_EVIDENCE_LENGTH = 1200;
 
 function statusForRequirementLevel(level: JobRequirementLevel): VacancyRequirement["status"] {
   if (level === "commercial") return "supported";
@@ -209,7 +210,7 @@ export function validateSavedJobRequirements(value: unknown): { ok: true; data: 
     if (keys.has(key)) return { ok: false, message: "The job requirements list contains duplicates." };
     keys.add(key);
     const evidenceValues = item.evidence;
-    if (!Array.isArray(evidenceValues) || evidenceValues.length > 10 || !evidenceValues.every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= 240)) return { ok: false, message: "requirement evidence is invalid." };
+    if (!Array.isArray(evidenceValues) || evidenceValues.length > 10 || !evidenceValues.every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= MAX_REQUIREMENT_EVIDENCE_LENGTH)) return { ok: false, message: "requirement evidence is invalid." };
     const evidence = evidenceValues as string[];
     result.push({ key, label, section: section as VacancyRequirementSection, category: category as VacancyRequirement["category"], importance, level: level as JobRequirementLevel, source: item.source === "user" ? "user" : "ai", status: statusForRequirementLevel(level as JobRequirementLevel), evidence });
   }
@@ -241,7 +242,7 @@ function parseRequirement(value: unknown): ParseResult<VacancyRequirement> {
   if (value.importance !== "must_have" && value.importance !== "nice_to_have") return { ok: false, message: "Vacancy requirement importance is invalid." };
   if (value.status !== "supported" && value.status !== "unconfirmed") return { ok: false, message: "Vacancy requirement status is invalid." };
   const evidenceValues = value.evidence;
-  if (!Array.isArray(evidenceValues) || evidenceValues.length > 10 || !evidenceValues.every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= 240)) return { ok: false, message: "requirement evidence is invalid." };
+  if (!Array.isArray(evidenceValues) || evidenceValues.length > 10 || !evidenceValues.every((entry) => typeof entry === "string" && entry.length > 0 && entry.length <= MAX_REQUIREMENT_EVIDENCE_LENGTH)) return { ok: false, message: "requirement evidence is invalid." };
   return { ok: true, data: { key, label: value.label, category: value.category as VacancyRequirement["category"], importance: value.importance, status: value.status, evidence: evidenceValues as string[] } };
 }
 

@@ -32,6 +32,17 @@ test("vacancy requirement keys are stabilized from labels", () => {
   assert.equal(parsed.data.mustHaveTechnical[0].key, "net-backend");
 });
 
+test("vacancy requirement evidence accepts bounded profile excerpts", () => {
+  const evidence = "A verified profile excerpt that explains the candidate's relevant experience. ".repeat(8);
+  const parsed = parseVacancyAnalysis({
+    mustHaveTechnical: [{ key: "react", label: "React", category: "technical", importance: "must_have", status: "supported", evidence: [evidence] }],
+    niceToHaveTechnical: [], tooling: [], architecture: [], domainKnowledge: [], responsibilities: [], ownershipExpectations: [],
+    senioritySignals: [], collaborationExpectations: [], leadershipExpectations: [], atsKeywords: [], employerTerminology: [],
+  });
+  if (!parsed.ok) assert.fail(parsed.message);
+  assert.equal(parsed.data.mustHaveTechnical[0].evidence[0], evidence);
+});
+
 test("commercial confirmation changes matching, while familiar does not", () => {
   const analysis = deterministicAnalysis({ job: { title: "Frontend Engineer", company: "Synthetic Co", description: "", technologies: ["GraphQL"] }, candidate: candidateProfileForAi(profile()), confirmations: [] });
   const parsed = parseVacancyAnalysis(analysis);
