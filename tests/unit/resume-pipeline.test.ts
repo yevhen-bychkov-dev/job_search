@@ -13,6 +13,7 @@ import {
 } from "../../src/features/cvs/domain.ts";
 import { renderResumeTemplate, validateResumeTemplateText } from "../../src/features/cvs/template.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
+import { inferLegacyRequirementsApproval, isMissingColumnError } from "../../src/lib/data/migration-compat.ts";
 
 function profile() {
   const parsed = parseCandidateProfile(JSON.parse(JSON.stringify(CANDIDATE_PROFILE_EXAMPLE)) as unknown);
@@ -31,6 +32,7 @@ test("vacancy extraction is strict and deterministic matching supplements config
   assert.equal(parsed.data.mustHaveTechnical.find(({ label }) => label === "GraphQL")?.status, "unconfirmed");
   assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, extra: true }, JOB, profile()).ok, false);
   assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, skills: [{ label: "GraphQL", category: "invented", importance: "must_have" }] }, JOB, profile()).ok, false);
+  assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, skills: Array.from({ length: 41 }, (_, index) => ({ label: `Synthetic skill ${index}`, category: "technical", importance: "nice_to_have" })) }, JOB, profile()).ok, false);
 });
 
 test("skills are editable but every retained skill requires an explicit approval level", () => {
@@ -45,6 +47,20 @@ test("skills are editable but every retained skill requires an explicit approval
   assert.deepEqual(approved.map(({ label, level }) => [label, level]), [["GraphQL APIs", "familiar"], ["React", "commercial"]]);
   const reconstructed = savedJobRequirementsToAnalysis({ analysis: analysisResult.data, requirements: editedResult.data, approvedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
   assert.equal(reconstructed.mustHaveTechnical.find(({ label }) => label === "GraphQL APIs")?.status, "confirmed_familiar");
+});
+
+test("legacy saved requirements remain readable during the approved_at migration window", () => {
+  assert.equal(isMissingColumnError({ message: "column job_resume_requirements.approved_at does not exist" }, "approved_at"), true);
+  assert.equal(isMissingColumnError({ code: "PGRST204", message: "Could not find the 'approved_at' column" }, "approved_at"), true);
+  assert.equal(isMissingColumnError({ code: "42501", message: "permission denied" }, "approved_at"), false);
+
+  const analysis = materializeVacancyAnalysis(RAW_SKILLS, JOB, profile());
+  if (!analysis.ok) assert.fail(analysis.message);
+  const draft = savedJobRequirementsFromAnalysis(analysis.data);
+  const updatedAt = "2026-08-23T10:00:00.000Z";
+  assert.equal(inferLegacyRequirementsApproval(draft.map((requirement) => ({ ...requirement, level: "commercial" })), updatedAt), updatedAt);
+  assert.equal(inferLegacyRequirementsApproval(draft, updatedAt), null);
+  assert.equal(inferLegacyRequirementsApproval([], updatedAt), null);
 });
 
 test("approved skills are authoritative in generated content and unsupported claims fall back to cited facts", () => {

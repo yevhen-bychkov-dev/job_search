@@ -51,8 +51,6 @@ export function skillSuggestionJsonSchema(): Record<string, unknown> {
     properties: {
       skills: {
         type: "array",
-        minItems: 1,
-        maxItems: 40,
         description: "Distinct vacancy skills and requirements that materially affect resume tailoring.",
         items: {
           type: "object",
@@ -68,9 +66,9 @@ export function skillSuggestionJsonSchema(): Record<string, unknown> {
           },
         },
       },
-      senioritySignals: { type: "array", maxItems: 20, items: { type: "string" } },
-      atsKeywords: { type: "array", maxItems: 50, items: { type: "string" } },
-      employerTerminology: { type: "array", maxItems: 50, items: { type: "string" } },
+      senioritySignals: { type: "array", items: { type: "string" } },
+      atsKeywords: { type: "array", items: { type: "string" } },
+      employerTerminology: { type: "array", items: { type: "string" } },
     },
   };
 }
@@ -83,11 +81,9 @@ export function resumeContentJsonSchema(): Record<string, unknown> {
     properties: {
       headline: { type: "string", description: "A truthful vacancy-specific professional headline." },
       summary: { type: "string", description: "A concise tailored summary grounded only in the verified profile." },
-      skills: { type: "array", maxItems: 40, items: { type: "string" } },
+      skills: { type: "array", items: { type: "string" } },
       experience: {
         type: "array",
-        minItems: 1,
-        maxItems: 20,
         items: {
           type: "object",
           additionalProperties: false,
@@ -96,22 +92,20 @@ export function resumeContentJsonSchema(): Record<string, unknown> {
             experienceId: { type: "string" },
             bullets: {
               type: "array",
-              minItems: 1,
-              maxItems: 12,
               items: {
                 type: "object",
                 additionalProperties: false,
                 required: ["text", "sourceAchievementIds"],
                 properties: {
                   text: { type: "string" },
-                  sourceAchievementIds: { type: "array", minItems: 1, maxItems: 4, items: { type: "string" } },
+                  sourceAchievementIds: { type: "array", items: { type: "string" } },
                 },
               },
             },
           },
         },
       },
-      educationIds: { type: "array", maxItems: 20, items: { type: "string" } },
+      educationIds: { type: "array", items: { type: "string" } },
     },
   };
 }

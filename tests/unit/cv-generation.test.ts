@@ -34,6 +34,8 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   const resumeConfig = resumeRequest.generationConfig as Record<string, unknown>;
   assert.deepEqual(analysisConfig.responseJsonSchema, skillSuggestionJsonSchema());
   assert.deepEqual(resumeConfig.responseJsonSchema, resumeContentJsonSchema());
+  assert.doesNotMatch(JSON.stringify(analysisConfig.responseJsonSchema), /minItems|maxItems/);
+  assert.doesNotMatch(JSON.stringify(resumeConfig.responseJsonSchema), /minItems|maxItems/);
   assert.equal("responseSchema" in analysisConfig, false);
   assert.equal("responseSchema" in resumeConfig, false);
   assert.match(JSON.stringify(resumeRequest), /Approved skill snapshot/);

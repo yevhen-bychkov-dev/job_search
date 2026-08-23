@@ -50,3 +50,5 @@ create unique index resume_generations_one_active_per_job_uidx
 create index resume_generations_lease_idx
   on public.resume_generations (lease_expires_at)
   where lease_expires_at is not null;
+
+notify pgrst, 'reload schema';

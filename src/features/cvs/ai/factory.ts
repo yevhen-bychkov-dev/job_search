@@ -36,8 +36,14 @@ export function createCvAiProvider(): CvAiProvider {
   if (isPlaywrightTestMode()) return new SyntheticCvProvider();
   const model = validModel("GEMINI_MODEL", requiredEnvironment("GEMINI_MODEL"));
   const configuredFallback = process.env.GEMINI_FALLBACK_MODEL?.trim();
-  const fallbackModel = configuredFallback && configuredFallback !== "PASTE_HERE"
-    ? validModel("GEMINI_FALLBACK_MODEL", configuredFallback)
+  const validConfiguredFallback = configuredFallback && configuredFallback !== "PASTE_HERE" && /^[A-Za-z0-9._-]{1,100}$/.test(configuredFallback)
+    ? configuredFallback
+    : null;
+  if (configuredFallback && configuredFallback !== "PASTE_HERE" && !validConfiguredFallback) {
+    console.warn(JSON.stringify({ event: "resume.gemini.config", field: "GEMINI_FALLBACK_MODEL", valid: false, fallbackDisabled: true }));
+  }
+  const fallbackModel = validConfiguredFallback
+    ? validModel("GEMINI_FALLBACK_MODEL", validConfiguredFallback)
     : model === "gemini-3.7-flash"
       ? "gemini-3.6-flash"
       : null;

@@ -25,6 +25,13 @@ export class DataConsistencyError extends Error {
   }
 }
 
+export class DatabaseMigrationRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DatabaseMigrationRequiredError";
+  }
+}
+
 export class ConcurrentModificationError extends Error {
   constructor() {
     super("This job changed in another tab. Reload the page before saving again.");

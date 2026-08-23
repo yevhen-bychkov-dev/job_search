@@ -16,6 +16,7 @@ import {
   type AppStore,
   ArtifactPersistenceError,
   ConcurrentModificationError,
+  DatabaseMigrationRequiredError,
   DataConsistencyError,
   DuplicateJobError,
   ResourceNotFoundError,
@@ -23,11 +24,17 @@ import {
   type StoredKnowledgeDownload,
   type StoredResumeTemplate,
 } from "./contracts";
+import { inferLegacyRequirementsApproval, isMissingColumnError } from "./migration-compat";
 
 type JobRow = Awaited<ReturnType<typeof getJobRows>>[number];
 
 const RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,generation_json,current_stage,attempt_count,next_retry_at,lease_expires_at,error_code,template_version,ai_provider,ai_model,created_at,updated_at";
+const LEGACY_RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,generation_json,current_stage,attempt_count,next_retry_at,error_code,template_version,created_at,updated_at";
 const ACTIVE_GENERATION_STATUSES: ResumeGenerationStatus[] = ["analyzing", "awaiting_confirmation", "strategizing", "generating", "critiquing", "correcting", "rendering", "retrying"];
+
+function isMissingResumeReliabilityColumn(error: { code?: string; message?: string } | null): boolean {
+  return ["lease_expires_at", "ai_provider", "ai_model"].some((column) => isMissingColumnError(error, column));
+}
 
 async function getJobRows(userId: string) {
   const supabase = await createServerSupabaseClient();
@@ -590,31 +597,46 @@ export class SupabaseAppStore implements AppStore {
 
   async getJobResumeRequirements(userId: string, jobId: string): Promise<JobResumeRequirements | null> {
     const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("job_resume_requirements").select("analysis_json,requirements_json,approved_at,updated_at").eq("user_id", userId).eq("job_id", jobId).maybeSingle();
+    let { data, error } = await supabase.from("job_resume_requirements").select("analysis_json,requirements_json,approved_at,updated_at").eq("user_id", userId).eq("job_id", jobId).maybeSingle();
+    if (isMissingColumnError(error, "approved_at")) {
+      const legacy = await supabase.from("job_resume_requirements").select("analysis_json,requirements_json,updated_at").eq("user_id", userId).eq("job_id", jobId).maybeSingle();
+      error = legacy.error;
+      data = legacy.data ? { ...legacy.data, approved_at: null } : null;
+    }
     if (error) throw new Error(`Unable to load job resume requirements: ${error.message}`);
     if (!data) return null;
     const analysis = parseVacancyAnalysis(data.analysis_json);
     const requirements = validateSavedJobRequirements(data.requirements_json);
     if (!analysis.ok || !requirements.ok) throw new DataConsistencyError("Stored resume skill suggestions are invalid.");
-    return { analysis: analysis.data, requirements: requirements.data, approvedAt: data.approved_at, updatedAt: data.updated_at };
+    const approvedAt = data.approved_at ?? inferLegacyRequirementsApproval(requirements.data, data.updated_at);
+    return { analysis: analysis.data, requirements: requirements.data, approvedAt, updatedAt: data.updated_at };
   }
 
   async saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[]; approvedAt: string | null }): Promise<JobResumeRequirements> {
     const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("job_resume_requirements").upsert({ user_id: userId, job_id: jobId, analysis_json: input.analysis as unknown as Json, requirements_json: input.requirements as unknown as Json, approved_at: input.approvedAt }, { onConflict: "job_id" }).select("analysis_json,requirements_json,approved_at,updated_at").single();
+    let { data, error } = await supabase.from("job_resume_requirements").upsert({ user_id: userId, job_id: jobId, analysis_json: input.analysis as unknown as Json, requirements_json: input.requirements as unknown as Json, approved_at: input.approvedAt }, { onConflict: "job_id" }).select("analysis_json,requirements_json,approved_at,updated_at").single();
+    if (isMissingColumnError(error, "approved_at")) {
+      const legacy = await supabase.from("job_resume_requirements").upsert({ user_id: userId, job_id: jobId, analysis_json: input.analysis as unknown as Json, requirements_json: input.requirements as unknown as Json }, { onConflict: "job_id" }).select("analysis_json,requirements_json,updated_at").single();
+      error = legacy.error;
+      data = legacy.data ? { ...legacy.data, approved_at: input.approvedAt } : null;
+    }
     if (error) throw new Error(`Unable to save job resume requirements: ${error.message}`);
+    if (!data) throw new Error("Unable to save job resume requirements: no row was returned.");
     return { analysis: data.analysis_json as VacancyAnalysis, requirements: data.requirements_json as SavedJobRequirement[], approvedAt: data.approved_at, updatedAt: data.updated_at };
   }
 
-  private toResumeGeneration(row: { id: string; job_id: string; status: ResumeGenerationStatus; idempotency_key: string; analysis_json: Json | null; confirmations_json: Json; generation_json: Json | null; current_stage: string | null; attempt_count: number; next_retry_at: string | null; lease_expires_at: string | null; error_code: string | null; template_version: number | null; ai_provider: string | null; ai_model: string | null; created_at: string; updated_at: string }): ResumeGeneration {
+  private toResumeGeneration(row: { id: string; job_id: string; status: ResumeGenerationStatus; idempotency_key: string; analysis_json: Json | null; confirmations_json: Json; generation_json: Json | null; current_stage: string | null; attempt_count: number; next_retry_at: string | null; lease_expires_at?: string | null; error_code: string | null; template_version: number | null; ai_provider?: string | null; ai_model?: string | null; created_at: string; updated_at: string }): ResumeGeneration {
     const analysis = row.analysis_json as VacancyAnalysis | null;
     const approvedSkills = row.confirmations_json as ApprovedResumeSkill[];
-    return { id: row.id, jobId: row.job_id, status: row.status, idempotencyKey: row.idempotency_key, analysis, approvedSkills, generatedContent: row.generation_json as GeneratedCvContent | null, currentStage: row.current_stage === "render" ? "render" : row.current_stage === null ? null : "generation", attemptCount: row.attempt_count, nextRetryAt: row.next_retry_at, leaseExpiresAt: row.lease_expires_at, errorCode: row.error_code, templateVersion: row.template_version, aiProvider: row.ai_provider, aiModel: row.ai_model, createdAt: row.created_at, updatedAt: row.updated_at };
+    return { id: row.id, jobId: row.job_id, status: row.status, idempotencyKey: row.idempotency_key, analysis, approvedSkills, generatedContent: row.generation_json as GeneratedCvContent | null, currentStage: row.current_stage === "render" ? "render" : row.current_stage === null ? null : "generation", attemptCount: row.attempt_count, nextRetryAt: row.next_retry_at, leaseExpiresAt: row.lease_expires_at ?? null, errorCode: row.error_code, templateVersion: row.template_version, aiProvider: row.ai_provider ?? null, aiModel: row.ai_model ?? null, createdAt: row.created_at, updatedAt: row.updated_at };
   }
 
   async createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration> {
     if (!(await this.getJob(userId, jobId))) throw new ResourceNotFoundError("Job");
     const supabase = await createServerSupabaseClient();
+    const schemaCheck = await supabase.from("resume_generations").select("lease_expires_at,ai_provider,ai_model").limit(0);
+    if (isMissingResumeReliabilityColumn(schemaCheck.error)) throw new DatabaseMigrationRequiredError("Apply migration 202608230001_resume_generation_reliability.sql before generating a resume.");
+    if (schemaCheck.error) throw new Error(`Unable to verify the resume generation schema: ${schemaCheck.error.message}`);
     const created = await supabase.from("resume_generations").insert({ user_id: userId, job_id: jobId, idempotency_key: idempotencyKey, status: "analyzing", confirmations_json: [] }).select(RESUME_GENERATION_SELECT).maybeSingle();
     if (!created.error && created.data) return this.toResumeGeneration(created.data);
     if (created.error?.code !== "23505") throw new Error(`Unable to create resume generation: ${created.error?.message ?? "unknown error"}`);
@@ -629,14 +651,24 @@ export class SupabaseAppStore implements AppStore {
 
   async getResumeGeneration(userId: string, id: string): Promise<ResumeGeneration | null> {
     const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("resume_generations").select(RESUME_GENERATION_SELECT).eq("user_id", userId).eq("id", id).maybeSingle();
+    let { data, error } = await supabase.from("resume_generations").select(RESUME_GENERATION_SELECT).eq("user_id", userId).eq("id", id).maybeSingle();
+    if (isMissingResumeReliabilityColumn(error)) {
+      const legacy = await supabase.from("resume_generations").select(LEGACY_RESUME_GENERATION_SELECT).eq("user_id", userId).eq("id", id).maybeSingle();
+      error = legacy.error;
+      data = legacy.data ? { ...legacy.data, lease_expires_at: null, ai_provider: null, ai_model: null } : null;
+    }
     if (error) throw new Error(`Unable to load resume generation: ${error.message}`);
     return data ? this.toResumeGeneration(data) : null;
   }
 
   async getLatestResumeGeneration(userId: string, jobId: string): Promise<ResumeGeneration | null> {
     const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("resume_generations").select(RESUME_GENERATION_SELECT).eq("user_id", userId).eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    let { data, error } = await supabase.from("resume_generations").select(RESUME_GENERATION_SELECT).eq("user_id", userId).eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (isMissingResumeReliabilityColumn(error)) {
+      const legacy = await supabase.from("resume_generations").select(LEGACY_RESUME_GENERATION_SELECT).eq("user_id", userId).eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      error = legacy.error;
+      data = legacy.data ? { ...legacy.data, lease_expires_at: null, ai_provider: null, ai_model: null } : null;
+    }
     if (error) throw new Error(`Unable to load latest resume generation: ${error.message}`);
     return data ? this.toResumeGeneration(data) : null;
   }
@@ -656,6 +688,7 @@ export class SupabaseAppStore implements AppStore {
     if (input.aiProvider !== undefined) update.ai_provider = input.aiProvider;
     if (input.aiModel !== undefined) update.ai_model = input.aiModel;
     const { data, error } = await supabase.from("resume_generations").update(update).eq("user_id", userId).eq("id", id).select(RESUME_GENERATION_SELECT).single();
+    if (isMissingResumeReliabilityColumn(error)) throw new DatabaseMigrationRequiredError("Apply migration 202608230001_resume_generation_reliability.sql before generating a resume.");
     if (error) throw new Error(`Unable to update resume generation: ${error.message}`);
     return this.toResumeGeneration(data);
   }
@@ -681,6 +714,7 @@ export class SupabaseAppStore implements AppStore {
       .or(`lease_expires_at.is.null,lease_expires_at.lt.${now}`)
       .select(RESUME_GENERATION_SELECT)
       .maybeSingle();
+    if (isMissingResumeReliabilityColumn(error)) throw new DatabaseMigrationRequiredError("Apply migration 202608230001_resume_generation_reliability.sql before generating a resume.");
     if (error) throw new Error(`Unable to claim resume generation stage: ${error.message}`);
     return data ? this.toResumeGeneration(data) : null;
   }

@@ -52,7 +52,8 @@ export function JobRequirementsEditor({ jobId, initialAnalysis, initialRequireme
   const approvedRequirements = saveState.requirements ?? initialRequirements;
   const approvedAt = saveState.approvedAt ?? (analyzeState.status === "success" ? null : initialApprovedAt);
   const hasUnsavedChanges = approvalComparable(shownRequirements) !== approvalComparable(approvedRequirements);
-  const canGenerate = hasResumeTemplate && Boolean(approvedAt) && !hasUnsavedChanges;
+  const hasApprovedSkills = shownRequirements.length > 0 && shownRequirements.every((requirement) => requirement.level !== "unconfirmed");
+  const canGenerate = hasResumeTemplate && Boolean(approvedAt) && hasApprovedSkills && !hasUnsavedChanges;
   useEffect(() => {
     if (saveState.status === "success") router.refresh();
   }, [router, saveState.status]);
@@ -86,6 +87,6 @@ export function JobRequirementsEditor({ jobId, initialAnalysis, initialRequireme
       <Feedback state={saveState} />
     </form> : null}
     {shownRequirements.length > 0 && canAnalyze ? <form action={analyzeAction} className="stack"><SubmitButton pendingLabel="Reanalyzing vacancy skills…">Reanalyze suggestions</SubmitButton><Feedback state={analyzeState} /></form> : null}
-    <GenerateCvForm jobId={jobId} canGenerate={canGenerate} disabledReason={!hasResumeTemplate ? "Upload an HTML template in Account first." : !approvedAt ? "Approve every skill before generating." : hasUnsavedChanges ? "Approve your latest skill edits before generating." : undefined} />
+    <GenerateCvForm jobId={jobId} canGenerate={canGenerate} disabledReason={!hasResumeTemplate ? "Upload an HTML template in Account first." : !approvedAt || !hasApprovedSkills ? "Approve every skill before generating." : hasUnsavedChanges ? "Approve your latest skill edits before generating." : undefined} />
   </section>;
 }

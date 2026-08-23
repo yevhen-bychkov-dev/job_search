@@ -14,7 +14,7 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "db:reset": "supabase db reset --local",
     "db:test": "supabase test db --local",
-    "db:types": "supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts"
+    "db:types": "node scripts/generate-db-types.mjs"
   },
   "dependencies": {
     "@sparticuz/chromium": "149.0.0",
