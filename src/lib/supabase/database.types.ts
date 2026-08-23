@@ -204,6 +204,7 @@ export type Database = {
       job_resume_requirements: {
         Row: {
           analysis_json: Json;
+          approved_at: string | null;
           job_id: string;
           requirements_json: Json;
           updated_at: string;
@@ -211,6 +212,7 @@ export type Database = {
         };
         Insert: {
           analysis_json: Json;
+          approved_at?: string | null;
           job_id: string;
           requirements_json: Json;
           updated_at?: string;
@@ -218,6 +220,7 @@ export type Database = {
         };
         Update: {
           analysis_json?: Json;
+          approved_at?: string | null;
           job_id?: string;
           requirements_json?: Json;
           updated_at?: string;
@@ -254,6 +257,8 @@ export type Database = {
       };
       resume_generations: {
         Row: {
+          ai_model: string | null;
+          ai_provider: string | null;
           analysis_json: Json | null;
           confirmations_json: Json;
           correction_json: Json | null;
@@ -266,6 +271,7 @@ export type Database = {
           idempotency_key: string;
           job_id: string;
           attempt_count: number;
+          lease_expires_at: string | null;
           next_retry_at: string | null;
           status: Database["public"]["Enums"]["resume_generation_status"];
           strategy_json: Json | null;
@@ -274,6 +280,8 @@ export type Database = {
           user_id: string;
         };
         Insert: {
+          ai_model?: string | null;
+          ai_provider?: string | null;
           analysis_json?: Json | null;
           confirmations_json?: Json;
           correction_json?: Json | null;
@@ -286,6 +294,7 @@ export type Database = {
           idempotency_key: string;
           job_id: string;
           attempt_count?: number;
+          lease_expires_at?: string | null;
           next_retry_at?: string | null;
           status?: Database["public"]["Enums"]["resume_generation_status"];
           strategy_json?: Json | null;
@@ -294,6 +303,8 @@ export type Database = {
           user_id: string;
         };
         Update: {
+          ai_model?: string | null;
+          ai_provider?: string | null;
           analysis_json?: Json | null;
           confirmations_json?: Json;
           correction_json?: Json | null;
@@ -306,6 +317,7 @@ export type Database = {
           idempotency_key?: string;
           job_id?: string;
           attempt_count?: number;
+          lease_expires_at?: string | null;
           next_retry_at?: string | null;
           status?: Database["public"]["Enums"]["resume_generation_status"];
           strategy_json?: Json | null;

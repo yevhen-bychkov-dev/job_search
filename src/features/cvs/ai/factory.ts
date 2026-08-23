@@ -3,8 +3,7 @@ import "server-only";
 import { isPlaywrightTestMode } from "@/lib/supabase/environment";
 
 import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput } from "./provider";
-import { CvAiProviderError, deterministicAnalysis, deterministicCritique, deterministicResume, deterministicStrategy } from "./provider";
-import type { ResumeCorrectionInput, ResumeCritiqueInput, ResumeStrategyInput } from "./provider";
+import { CvAiProviderError, deterministicAnalysis, deterministicResume } from "./provider";
 import { GeminiCvProvider } from "./providers/gemini";
 
 class SyntheticCvProvider implements CvAiProvider {
@@ -19,21 +18,6 @@ class SyntheticCvProvider implements CvAiProvider {
   async generateCv(input: GenerateCvInput): Promise<unknown> {
     await new Promise((resolve) => setTimeout(resolve, 150));
     return deterministicResume(input);
-  }
-
-  async createStrategy(input: ResumeStrategyInput): Promise<unknown> {
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    return deterministicStrategy(input);
-  }
-
-  async critiqueCv(input: ResumeCritiqueInput): Promise<unknown> {
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    return deterministicCritique(input);
-  }
-
-  async correctCv(input: ResumeCorrectionInput): Promise<unknown> {
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    return deterministicResume({ ...input, strategy: input.strategy } as GenerateCvInput);
   }
 }
 

@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(101);
+select plan(105);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -310,6 +310,7 @@ select lives_ok(
 );
 select is((select count(*) from public.job_resume_requirements), 1::bigint, 'user A can read job requirements');
 select is((with changed as (update public.job_resume_requirements set requirements_json = '[]'::jsonb returning *) select count(*) from changed), 1::bigint, 'user A can edit owned job requirements');
+select is((with changed as (update public.job_resume_requirements set approved_at = now() returning *) select count(*) from changed), 1::bigint, 'user A can persist explicit skill approval');
 select lives_ok(
   $$insert into public.resume_generations (id, user_id, job_id, status, idempotency_key, analysis_json, confirmations_json, template_version)
     values ('ffffffff-ffff-4fff-8fff-ffffffffffff', '11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'analyzing', 'synthetic-idempotency-1', '{}'::jsonb, '[]'::jsonb, 1)$$,
@@ -319,6 +320,21 @@ select is((select count(*) from public.resume_generations), 1::bigint, 'user A c
 select is((with changed as (update public.resume_generations set status = 'awaiting_confirmation' returning *) select count(*) from changed), 1::bigint, 'user A can advance owned resume generation state');
 select is((with changed as (update public.resume_generations set status = 'strategizing', current_stage = 'strategy', strategy_json = '{"targetPositioning":"Product Engineer"}'::jsonb, attempt_count = 1 returning *) select count(*) from changed), 1::bigint, 'user A can persist a resumable resume strategy stage');
 select is((select strategy_json->>'targetPositioning' from public.resume_generations where id = 'ffffffff-ffff-4fff-8fff-ffffffffffff'), 'Product Engineer', 'resume strategy artifact is persisted');
+select is((with changed as (update public.resume_generations set status = 'generating', current_stage = 'generation', lease_expires_at = now() + interval '90 seconds', ai_provider = 'gemini', ai_model = 'synthetic-model' returning *) select count(*) from changed), 1::bigint, 'user A can lease and record the content generation stage');
+select throws_ok(
+  $$insert into public.resume_generations (user_id, job_id, status, idempotency_key)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'rendering', 'synthetic-concurrent-key')$$,
+  '23505', null, 'database permits only one active generation per user and job'
+);
+select lives_ok(
+  $$with retired as (
+      update public.resume_generations set status = 'failed', lease_expires_at = null
+      where id = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+    )
+    insert into public.resume_generations (user_id, job_id, status, idempotency_key)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'rendering', 'synthetic-resume-key')$$,
+  'a new active generation is allowed after the previous one becomes inactive'
+);
 
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 select is((select count(*) from public.resume_templates), 0::bigint, 'user B cannot read user A templates');

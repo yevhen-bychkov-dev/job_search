@@ -7,7 +7,7 @@ import { ResourceNotFoundError } from "@/lib/data/contracts";
 import { reportUnexpectedError } from "@/lib/server-errors";
 import { isUuid } from "@/lib/validation";
 
-import { analyzeJobRequirements, beginResumeGeneration, MissingCandidateProfileError, MissingJobRequirementsError, MissingResumeTemplateError, ResumeGenerationError, saveJobRequirements } from "./service";
+import { analyzeJobRequirements, beginResumeGeneration, MissingCandidateProfileError, MissingJobRequirementsError, MissingResumeTemplateError, renderResumeGeneration, ResumeGenerationError, saveJobRequirements } from "./service";
 import type { CvActionState, RequirementsActionState } from "./types";
 
 function failure(operation: string, error: unknown): CvActionState {
@@ -31,7 +31,8 @@ export async function analyzeRequirementsAction(jobId: string, _previous: Requir
   if (!isUuid(jobId)) return { status: "error", message: "Invalid job identifier." };
   try {
     const analyzed = await analyzeJobRequirements(identity.userId, jobId);
-    return { status: "success", message: "Requirements analyzed. Review the list and save your choices.", analysis: analyzed.analysis, requirements: analyzed.requirements };
+    revalidatePath(`/jobs/${jobId}`);
+    return { status: "success", message: "Skill suggestions are saved as a draft. Review, edit, and approve them before generating.", analysis: analyzed.analysis, requirements: analyzed.requirements, approvedAt: null };
   } catch (error) {
     return requirementsFailure("cvs.requirements.analyze", error);
   }
@@ -54,7 +55,7 @@ export async function saveRequirementsAction(jobId: string, _previous: Requireme
   try {
     const saved = await saveJobRequirements(identity.userId, jobId, parsedAnalysis, parsedRequirements);
     revalidatePath(`/jobs/${jobId}`);
-    return { status: "success", message: "Job requirements saved.", requirements: saved.requirements };
+    return { status: "success", message: "Skills approved for resume generation.", requirements: saved.requirements, analysis: saved.analysis, approvedAt: saved.approvedAt };
   } catch (error) {
     return requirementsFailure("cvs.requirements.save", error);
   }
@@ -67,10 +68,27 @@ export async function generateCvAction(jobId: string, _previous: CvActionState, 
   if (typeof idempotencyKey !== "string" || !isUuid(idempotencyKey)) return { status: "error", message: "The generation request is invalid. Refresh and try again." };
   try {
     const result = await beginResumeGeneration(identity.userId, jobId, idempotencyKey);
-    if (result.kind === "in_progress") return { status: "success", message: "Resume generation is already in progress. You can leave this page and return later." };
+    if (result.kind === "in_progress") return { status: "in_progress", message: "Another request owns this generation stage. Wait a moment, then retry.", generationId: result.generation.id, stage: result.generation.currentStage ?? "generation" };
+    if (result.kind === "ready_to_render") return { status: "ready_to_render", message: "Structured resume content is ready. Rendering the PDF…", generationId: result.generation.id, stage: "render" };
     revalidatePath(`/jobs/${jobId}`);
-    return { status: "success", message: `Resume #${result.cv.version} generated.` };
+    return { status: "success", message: `Resume #${result.cv.version} generated.`, generationId: result.generation.id, stage: "render" };
   } catch (error) {
     return failure("cvs.generate", error);
+  }
+}
+
+export async function renderCvAction(jobId: string, _previous: CvActionState, formData: FormData): Promise<CvActionState> {
+  const identity = await requireIdentity();
+  if (!isUuid(jobId)) return { status: "error", message: "Invalid job identifier.", stage: "render" };
+  const generationId = formData.get("generationId");
+  if (typeof generationId !== "string" || !isUuid(generationId)) return { status: "error", message: "The render request is invalid. Refresh and try again.", stage: "render" };
+  try {
+    const result = await renderResumeGeneration(identity.userId, jobId, generationId);
+    if (result.kind === "in_progress") return { status: "in_progress", message: "Another request is rendering this PDF. Wait a moment, then retry.", generationId, stage: "render" };
+    revalidatePath(`/jobs/${jobId}`);
+    return { status: "success", message: `Resume #${result.cv.version} generated.`, generationId, stage: "render" };
+  } catch (error) {
+    const state = failure("cvs.render", error);
+    return { ...state, generationId, stage: "render" };
   }
 }

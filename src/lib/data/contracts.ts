@@ -1,5 +1,5 @@
 import type { FilterSettings } from "@/features/filters/types";
-import type { GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeAiStage, ResumeConfirmation, ResumeCritique, ResumeGeneration, ResumeGenerationStatus, ResumeStrategy, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
+import type { ApprovedResumeSkill, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeAiStage, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
 import type { KnowledgeDocumentKind, KnowledgeFile } from "@/features/knowledge/types";
@@ -29,6 +29,16 @@ export class ConcurrentModificationError extends Error {
   constructor() {
     super("This job changed in another tab. Reload the page before saving again.");
     this.name = "ConcurrentModificationError";
+  }
+}
+
+export class ArtifactPersistenceError extends Error {
+  readonly stage: "upload" | "metadata" | "cleanup";
+
+  constructor(stage: "upload" | "metadata" | "cleanup", message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ArtifactPersistenceError";
+    this.stage = stage;
   }
 }
 
@@ -88,11 +98,12 @@ export interface AppStore {
   listResumeConfirmations(userId: string): Promise<ResumeConfirmation[]>;
   saveResumeConfirmation(userId: string, confirmation: ResumeConfirmation): Promise<ResumeConfirmation>;
   getJobResumeRequirements(userId: string, jobId: string): Promise<JobResumeRequirements | null>;
-  saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[] }): Promise<JobResumeRequirements>;
+  saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[]; approvedAt: string | null }): Promise<JobResumeRequirements>;
   createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration>;
   getResumeGeneration(userId: string, id: string): Promise<ResumeGeneration | null>;
   getLatestResumeGeneration(userId: string, jobId: string): Promise<ResumeGeneration | null>;
-  updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; confirmations?: ResumeConfirmation[]; strategy?: ResumeStrategy | null; generatedContent?: GeneratedCvContent | null; critique?: ResumeCritique | null; correction?: GeneratedCvContent | null; currentStage?: ResumeAiStage | null; attemptCount?: number; nextRetryAt?: string | null; errorCode?: string | null; templateVersion?: number | null }): Promise<ResumeGeneration>;
+  claimResumeGeneration(userId: string, id: string, input: { expectedUpdatedAt: string; status: "generating" | "rendering"; currentStage: ResumeAiStage; leaseExpiresAt: string; analysis?: VacancyAnalysis; approvedSkills?: ApprovedResumeSkill[]; templateVersion?: number }): Promise<ResumeGeneration | null>;
+  updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; approvedSkills?: ApprovedResumeSkill[]; generatedContent?: GeneratedCvContent | null; currentStage?: ResumeAiStage | null; attemptCount?: number; nextRetryAt?: string | null; leaseExpiresAt?: string | null; errorCode?: string | null; templateVersion?: number | null; aiProvider?: string | null; aiModel?: string | null }): Promise<ResumeGeneration>;
   listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]>;
   createGeneratedCv(
     userId: string,

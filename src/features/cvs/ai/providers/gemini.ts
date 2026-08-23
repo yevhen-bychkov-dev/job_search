@@ -1,9 +1,9 @@
 import "server-only";
 
-import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput, ResumeAiContext, ResumeCorrectionInput, ResumeCritiqueInput, ResumeStrategyInput } from "../provider.ts";
+import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput, ResumeAiContext } from "../provider.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse } from "../provider.ts";
-import { buildGeminiAnalysisRequest, buildGeminiCorrectionRequest, buildGeminiCritiqueRequest, buildGeminiResumeRequest, buildGeminiStrategyRequest } from "../gemini-request.ts";
-import { fetchGeminiWithFallback, isGeminiTimeout, withGeminiConcurrency } from "../gemini-retry.ts";
+import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
+import { fetchGeminiWithFallback, isGeminiTimeout } from "../gemini-retry.ts";
 
 export class GeminiCvProvider implements CvAiProvider {
   readonly providerId = "gemini";
@@ -35,7 +35,7 @@ export class GeminiCvProvider implements CvAiProvider {
     const metadata = { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown", model: this.selectedModel };
     let response: Response;
     try {
-      const result = await withGeminiConcurrency(() => fetchGeminiWithFallback(
+      const result = await fetchGeminiWithFallback(
         this.fetchImplementation,
         this.primaryModel,
         this.fallbackModel,
@@ -47,18 +47,17 @@ export class GeminiCvProvider implements CvAiProvider {
             "x-goog-api-key": this.apiKey,
           },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(40_000),
         }),
         undefined,
-        undefined,
         { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown" },
-      ));
+      );
       response = result.response;
       this.selectedModel = result.model;
-      console.info(JSON.stringify({ event: "resume.gemini", ...metadata, model: result.model, durationMs: Date.now() - startedAt, responseStatus: Math.floor(response.status / 100) * 100, success: response.ok }));
+      console.info(JSON.stringify({ event: "resume.gemini", ...metadata, model: result.model, attempts: result.attempts, durationMs: Date.now() - startedAt, responseStatus: Math.floor(response.status / 100) * 100, success: response.ok }));
     } catch (error) {
       console.warn(JSON.stringify({ event: "resume.gemini", ...metadata, durationMs: Date.now() - startedAt, success: false, errorCategory: error instanceof CvAiProviderError ? error.code : "network" }));
-      if (isGeminiTimeout(error)) throw new CvAiProviderError("GEMINI_TIMEOUT", "Gemini did not respond within 60 seconds.", { cause: error });
+      if (isGeminiTimeout(error)) throw new CvAiProviderError("GEMINI_TIMEOUT", "Gemini did not respond within 40 seconds.", { cause: error });
       throw new CvAiProviderError("GEMINI_NETWORK_FAILURE", "Gemini request did not complete.", { cause: error });
     }
     if (!response.ok) {
@@ -88,19 +87,7 @@ export class GeminiCvProvider implements CvAiProvider {
     return this.request(buildGeminiAnalysisRequest(input), context);
   }
 
-  async createStrategy(input: ResumeStrategyInput): Promise<unknown> {
-    return this.request(buildGeminiStrategyRequest(input), input.context);
-  }
-
-  async generateCv(input: GenerateCvInput & { strategy?: unknown }, context?: ResumeAiContext): Promise<unknown> {
+  async generateCv(input: GenerateCvInput, context?: ResumeAiContext): Promise<unknown> {
     return this.request(buildGeminiResumeRequest(input), context);
-  }
-
-  async critiqueCv(input: ResumeCritiqueInput): Promise<unknown> {
-    return this.request(buildGeminiCritiqueRequest(input), input.context);
-  }
-
-  async correctCv(input: ResumeCorrectionInput): Promise<unknown> {
-    return this.request(buildGeminiCorrectionRequest(input), input.context);
   }
 }

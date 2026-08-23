@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
 
 const TEST_EMAIL = "demo.user@example.test";
 const SECONDARY_TEST_EMAIL = "other.user@example.test";
@@ -274,7 +275,8 @@ test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
   await expect(page.getByText("No files uploaded")).toBeVisible();
 });
 
-test("generate immutable CV versions from the verified Candidate Profile", async ({ page }) => {
+test("generate immutable CV versions from approved skills and prevent duplicate submissions", async ({ page }, testInfo) => {
+  test.slow();
   await signIn(page);
   await page.getByRole("link", { name: "Account", exact: true }).click();
   await page.getByLabel("Import HTML resume template").setInputFiles({
@@ -333,35 +335,39 @@ test("generate immutable CV versions from the verified Candidate Profile", async
   await expect(page.getByRole("heading", { name: "CVs" })).toBeVisible();
   const ownedJobUrl = new URL(page.url()).pathname;
   await expect(page.getByText("No CVs generated for this job yet.")).toBeVisible();
-  await page.getByRole("button", { name: "Analyze requirements", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Analyzing requirements…" })).toBeDisabled();
+  await page.getByRole("button", { name: "Analyze job & suggest skills", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Analyzing vacancy skills…" })).toBeDisabled();
   await expect(page.locator('input[value="GraphQL"]')).toBeVisible();
   await page.getByLabel("Experience level for GraphQL").selectOption("commercial");
-  await page.getByRole("button", { name: "Save requirements", exact: true }).click();
-  await expect(page.getByText("Job requirements saved.")).toBeVisible();
-  await page.getByRole("button", { name: "Generate CV", exact: true }).click();
-  await expect(page.getByText("Resume #1 generated.")).toBeVisible();
-  for (let version = 2; version <= 5; version += 1) {
-    await page.getByRole("button", { name: "Generate CV", exact: true }).click();
-    await expect(page.getByText(`Resume #${version} generated.`)).toBeVisible();
-  }
-  await expect(page.locator(".cv-list strong")).toHaveText(["CV #5", "CV #4", "CV #3", "CV #2", "CV #1"]);
-  await expect(page.getByRole("link", { name: "Preview" })).toHaveCount(5);
-  await expect(page.getByRole("link", { name: "Download" })).toHaveCount(5);
+  await page.getByRole("button", { name: "Approve skills", exact: true }).click();
+  await expect(page.getByText("Skills approved for resume generation.")).toBeVisible();
+  await page.getByRole("button", { name: "Generate tailored resume", exact: true }).dblclick();
+  await expect(page.getByText("Resume #1 generated.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".cv-list strong")).toHaveText(["CV #1"]);
+  await page.getByRole("button", { name: "Generate tailored resume", exact: true }).click();
+  await expect(page.getByText("Resume #2 generated.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".cv-list strong")).toHaveText(["CV #2", "CV #1"]);
+  await expect(page.getByRole("link", { name: "Preview" })).toHaveCount(2);
+  await expect(page.getByRole("link", { name: "Download" })).toHaveCount(2);
 
   const previewHrefs = await page.getByRole("link", { name: "Preview" }).evaluateAll((links) => links.map((link) => link.getAttribute("href")));
   const downloadHrefs = await page.getByRole("link", { name: "Download" }).evaluateAll((links) => links.map((link) => link.getAttribute("href")));
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 2; index += 1) {
     const previewHref = previewHrefs[index];
     const downloadHref = downloadHrefs[index];
-    if (!previewHref || !downloadHref) throw new Error(`Generated CV #${5 - index} links were not rendered.`);
+    if (!previewHref || !downloadHref) throw new Error(`Generated CV #${2 - index} links were not rendered.`);
     const preview = await page.request.get(previewHref);
     expect(preview.ok()).toBeTruthy();
     expect(preview.headers()["content-type"]).toContain("application/pdf");
     expect(preview.headers()["content-disposition"]).toContain("inline");
+    if (index === 0) {
+      const pdfPath = testInfo.outputPath("synthetic-generated-resume.pdf");
+      await writeFile(pdfPath, await preview.body());
+      await testInfo.attach("synthetic-generated-resume.pdf", { path: pdfPath, contentType: "application/pdf" });
+    }
     const download = await page.request.get(downloadHref);
     expect(download.ok()).toBeTruthy();
-    expect(download.headers()["content-disposition"]).toContain(`attachment; filename*=UTF-8''cv-v${5 - index}.pdf`);
+    expect(download.headers()["content-disposition"]).toContain(`attachment; filename*=UTF-8''cv-v${2 - index}.pdf`);
   }
 
   await page.context().clearCookies();

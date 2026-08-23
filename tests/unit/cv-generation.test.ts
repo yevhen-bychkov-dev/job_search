@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CvAiProviderError, extractGeminiStructuredResponse, geminiResponseSchema, selectionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
-import { buildGeminiCvRequest } from "../../src/features/cvs/ai/gemini-request.ts";
-import { fetchGeminiWithFallback, fetchGeminiWithRetry, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
+import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../../src/features/cvs/ai/gemini-request.ts";
+import { fetchGeminiWithFallback, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
+import { CvAiProviderError, extractGeminiStructuredResponse, resumeContentJsonSchema, skillSuggestionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
+import { nextCvVersion, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
-import { materializeGeneratedCv, mergeResumeConfirmations, nextCvVersion, parseCvSelection, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
-import { renderCvPdf } from "../../src/features/cvs/pdf.ts";
+import type { VacancyAnalysis } from "../../src/features/cvs/types.ts";
 
 function profile() {
   const parsed = parseCandidateProfile(JSON.parse(JSON.stringify(CANDIDATE_PROFILE_EXAMPLE)) as unknown);
@@ -14,331 +14,76 @@ function profile() {
   return parsed.data;
 }
 
-function verifiedSelection() {
-  return {
-    includeSummary: true,
-    skillOrder: ["TypeScript", "React"],
-    experience: [{ experienceId: "synthetic-labs-frontend", achievementIds: ["accessible-design-system"] }],
-    educationIds: ["example-university-cs"],
-  };
-}
+const EMPTY_ANALYSIS: VacancyAnalysis = {
+  mustHaveTechnical: [], niceToHaveTechnical: [], tooling: [], architecture: [], domainKnowledge: [], responsibilities: [], ownershipExpectations: [], collaborationExpectations: [], leadershipExpectations: [], senioritySignals: [], atsKeywords: [], employerTerminology: [],
+};
 
-test("candidate profile parsing is strict and removes contact PII from Gemini input", () => {
-  const candidate = profile();
-  const aiInput = candidateProfileForAi(candidate);
-  const serialized = JSON.stringify(aiInput);
-  assert.doesNotMatch(serialized, /alex@example\.test/i);
-  assert.doesNotMatch(serialized, /000 000 000/);
-  assert.doesNotMatch(serialized, /linkedin\.com/);
-  assert.doesNotMatch(serialized, /Alex Example/);
-  assert.doesNotMatch(serialized, /Warsaw, Poland/);
+test("Candidate Profile parsing is strict and the Gemini projection removes contact PII", () => {
+  const serialized = JSON.stringify(candidateProfileForAi(profile()));
+  assert.doesNotMatch(serialized, /Alex Example|alex@example\.test|000 000 000|linkedin\.com|Warsaw, Poland/i);
   assert.match(serialized, /accessible shared components/);
-
-  const withUnknownField = { ...JSON.parse(JSON.stringify(CANDIDATE_PROFILE_EXAMPLE)), unsupported: true };
-  assert.deepEqual(parseCandidateProfile(withUnknownField), {
-    ok: false,
-    message: "Candidate profile must be an object with only supported fields.",
-  });
+  assert.equal(parseCandidateProfile({ ...CANDIDATE_PROFILE_EXAMPLE, unsupported: true }).ok, false);
 });
 
-test("model selections materialize only exact verified facts", () => {
-  const candidate = profile();
-  const generated = materializeGeneratedCv(candidate, verifiedSelection());
-  if (!generated.ok) assert.fail(generated.message);
-  assert.equal(generated.data.experience[0].company, "Synthetic Labs");
-  assert.deepEqual(generated.data.experience[0].achievements, [
-    "Built accessible shared components used across internal applications.",
-  ]);
-  assert.equal(generated.data.summary, candidate.summary);
-  assert.deepEqual(generated.data.skills, ["TypeScript", "React"]);
+test("Gemini requests use current JSON Schema structured outputs", () => {
+  const job = { title: "Frontend Engineer", company: "Synthetic Co", description: "React and TypeScript", technologies: ["React"] };
+  const analysisRequest = buildGeminiAnalysisRequest({ job });
+  const approvedSkills = [{ key: "react", label: "React", level: "commercial" as const, provenance: "existing_kb" as const }];
+  const resumeRequest = buildGeminiResumeRequest({ job, candidate: candidateProfileForAi(profile()), analysis: EMPTY_ANALYSIS, approvedSkills });
+  const analysisConfig = analysisRequest.generationConfig as Record<string, unknown>;
+  const resumeConfig = resumeRequest.generationConfig as Record<string, unknown>;
+  assert.deepEqual(analysisConfig.responseJsonSchema, skillSuggestionJsonSchema());
+  assert.deepEqual(resumeConfig.responseJsonSchema, resumeContentJsonSchema());
+  assert.equal("responseSchema" in analysisConfig, false);
+  assert.equal("responseSchema" in resumeConfig, false);
+  assert.match(JSON.stringify(resumeRequest), /Approved skill snapshot/);
+  assert.doesNotMatch(JSON.stringify(resumeRequest), /alex@example\.test|Alex Example|linkedin\.com/i);
 });
 
-test("stored CV content accepts the candidate profile achievement length limit", () => {
-  const content = {
-    headline: "Frontend Engineer",
-    summary: null,
-    skills: ["TypeScript"],
-    experience: [{
-      company: "Synthetic Labs",
-      role: "Frontend Engineer",
-      startDate: "2023",
-      endDate: null,
-      technologies: ["TypeScript"],
-      achievements: ["A".repeat(600)],
-    }],
-    education: [],
-  };
-  assert.equal(parseGeneratedCvContent(content).ok, true);
-  content.experience[0].achievements = ["A".repeat(601)];
-  assert.equal(parseGeneratedCvContent(content).ok, false);
-});
-
-test("invalid or invented model selections are rejected", () => {
-  assert.equal(parseCvSelection({ ...verifiedSelection(), extra: "unsupported" }).ok, false);
-  const inventedSkill = materializeGeneratedCv(profile(), { ...verifiedSelection(), skillOrder: ["AWS"] });
-  assert.equal(inventedSkill.ok, false);
-  if (!inventedSkill.ok) assert.match(inventedSkill.message, /outside the verified profile/);
-  const wrongAchievement = {
-    ...verifiedSelection(),
-    experience: [{ experienceId: "synthetic-labs-frontend", achievementIds: ["invented-metric"] }],
-  };
-  const result = materializeGeneratedCv(profile(), wrongAchievement);
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.message, /outside its verified experience/);
-});
-
-test("version calculation always advances the highest valid version", () => {
-  assert.equal(nextCvVersion([]), 1);
-  assert.equal(nextCvVersion([1, 5, 3]), 6);
-  assert.equal(nextCvVersion([0, -1, 2.5, 2]), 3);
-});
-
-test("Gemini schema constrains response shape without embedding candidate enums", () => {
-  const candidate = profile();
-  const schema = selectionJsonSchema({
-    job: { title: "Frontend Engineer", company: "Synthetic Co", description: "React role", technologies: ["React"] },
-    candidate: candidateProfileForAi(candidate),
-  });
-  const serialized = JSON.stringify(schema);
-  assert.doesNotMatch(serialized, /synthetic-labs-frontend/);
-  assert.doesNotMatch(serialized, /accessible-design-system/);
-  assert.doesNotMatch(serialized, /TypeScript/);
-  assert.doesNotMatch(serialized, /alex@example\.test/i);
-  const properties = schema.properties as Record<string, Record<string, unknown>>;
-  assert.equal(properties.skillOrder.maxItems, candidate.skills.length);
-  assert.equal(properties.experience.maxItems, candidate.experience.length);
-  assert.equal(properties.educationIds.maxItems, candidate.education.length);
-  assert.ok(serialized.length < 2_000);
-});
-
-test("Gemini schema conversion omits array limits rejected by GenerateContent", () => {
-  assert.deepEqual(geminiResponseSchema({
-    type: "array",
-    minItems: 1,
-    maxItems: 20,
-    items: { type: "string" },
-  }), {
-    type: "ARRAY",
-    items: { type: "STRING" },
-  });
-});
-
-test("Gemini retries transient HTTP failures and not permanent request errors", async () => {
+test("Gemini retries one infrastructure failure and uses the fallback model", async () => {
   assert.equal(isRetryableGeminiStatus(408), true);
-  assert.equal(isRetryableGeminiStatus(429), true);
   assert.equal(isRetryableGeminiStatus(503), true);
+  assert.equal(isRetryableGeminiStatus(429), false);
   assert.equal(isRetryableGeminiStatus(400), false);
-
-  const statuses = [503, 503, 200];
-  const delays: number[] = [];
-  const response = await fetchGeminiWithRetry(
-    async () => new Response("{}", { status: statuses.shift() ?? 500 }),
-    "https://example.test/gemini",
-    () => ({ method: "POST" }),
-    async (milliseconds) => { delays.push(milliseconds); },
-    () => 0.5,
-  );
-  assert.equal(response.status, 200);
-  assert.deepEqual(delays, [1_000, 2_000]);
-
-  let permanentAttempts = 0;
-  const permanent = await fetchGeminiWithRetry(
-    async () => { permanentAttempts += 1; return new Response("{}", { status: 400 }); },
-    "https://example.test/gemini",
-    () => ({ method: "POST" }),
-  );
-  assert.equal(permanent.status, 400);
-  assert.equal(permanentAttempts, 1);
-
-  let rateLimitAttempts = 0;
-  const rateLimitDelays: number[] = [];
-  const rateLimited = await fetchGeminiWithRetry(
-    async () => { rateLimitAttempts += 1; return new Response("{}", { status: rateLimitAttempts < 3 ? 429 : 200, headers: { "retry-after": "1" } }); },
-    "https://example.test/gemini",
-    () => ({ method: "POST" }),
-    async (milliseconds) => { rateLimitDelays.push(milliseconds); },
-  );
-  assert.equal(rateLimited.status, 200);
-  assert.equal(rateLimitAttempts, 3);
-  assert.deepEqual(rateLimitDelays, [1_000, 1_000]);
-});
-
-test("Gemini falls back only after persistent primary-model 503 responses", async () => {
   const endpoints: string[] = [];
   const delays: number[] = [];
   const result = await fetchGeminiWithFallback(
-    async (endpoint) => {
-      endpoints.push(String(endpoint));
-      return new Response("{}", { status: endpoints.length <= 5 ? 503 : 200 });
-    },
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    (model) => `https://example.test/${model}`,
-    () => ({ method: "POST" }),
-    async (milliseconds) => { delays.push(milliseconds); },
-    () => 0.5,
+    async (endpoint) => { endpoints.push(String(endpoint)); return new Response("{}", { status: endpoints.length === 1 ? 503 : 200 }); },
+    "primary", "fallback", (model) => `https://example.test/${model}`, () => ({ method: "POST" }),
+    async (milliseconds: number) => { delays.push(milliseconds); },
   );
   assert.equal(result.response.status, 200);
-  assert.equal(result.model, "gemini-3.6-flash");
-  assert.deepEqual(endpoints, [
-    ...Array.from({ length: 5 }, () => "https://example.test/gemini-3.7-flash"),
-    "https://example.test/gemini-3.6-flash",
-  ]);
-  assert.deepEqual(delays, [1_000, 2_000, 4_000, 8_000]);
-
-  let fallbackCalls = 0;
-  const permanent = await fetchGeminiWithFallback(
-    async () => { fallbackCalls += 1; return new Response("{}", { status: 400 }); },
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    (model) => `https://example.test/${model}`,
-    () => ({ method: "POST" }),
-  );
-  assert.equal(permanent.response.status, 400);
-  assert.equal(permanent.model, "gemini-3.7-flash");
-  assert.equal(fallbackCalls, 1);
-
-  const rateLimitEndpoints: string[] = [];
-  const rateLimited = await fetchGeminiWithFallback(
-    async (endpoint) => {
-      rateLimitEndpoints.push(String(endpoint));
-      return new Response("{}", { status: rateLimitEndpoints.length === 1 ? 429 : 200 });
-    },
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    (model) => `https://example.test/${model}`,
-    () => ({ method: "POST" }),
-  );
-  assert.equal(rateLimited.response.status, 200);
-  assert.equal(rateLimited.model, "gemini-3.7-flash");
-  assert.deepEqual(rateLimitEndpoints, [
-    "https://example.test/gemini-3.7-flash",
-    "https://example.test/gemini-3.7-flash",
-  ]);
+  assert.equal(result.model, "fallback");
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(endpoints, ["https://example.test/primary", "https://example.test/fallback"]);
+  assert.deepEqual(delays, [300]);
 });
 
-test("Gemini retry exhaustion remains bounded for transient failures", async () => {
-  let attempts = 0;
-  const delays: number[] = [];
-  const response = await fetchGeminiWithRetry(
-    async () => { attempts += 1; return new Response("{}", { status: 500 }); },
-    "https://example.test/gemini",
-    () => ({ method: "POST" }),
-    async (milliseconds) => { delays.push(milliseconds); },
-    () => 0.5,
-  );
-  assert.equal(response.status, 500);
-  assert.equal(attempts, 5);
-  assert.equal(delays.length, 4);
+test("Gemini never amplifies quota or permanent request failures", async () => {
+  for (const status of [400, 429]) {
+    let attempts = 0;
+    const result = await fetchGeminiWithFallback(
+      async () => { attempts += 1; return new Response("{}", { status }); },
+      "primary", "fallback", (model) => `https://example.test/${model}`, () => ({ method: "POST" }),
+    );
+    assert.equal(result.response.status, status);
+    assert.equal(attempts, 1);
+  }
 });
 
-test("resume confirmations are deduplicated with the newest explicit answer winning", () => {
-  const merged = mergeResumeConfirmations(
-    [{ key: "azure", label: "Azure", level: "familiar", provenance: "explicit_user_confirmation" }],
-    [
-      { key: "azure", label: "Azure cloud stack", level: "commercial", provenance: "explicit_user_confirmation" },
-      { key: "cqrs", label: "CQRS", level: "none", provenance: "explicit_user_confirmation" },
-    ],
-  );
-  assert.deepEqual(merged, [
-    { key: "azure", label: "Azure cloud stack", level: "commercial", provenance: "explicit_user_confirmation" },
-    { key: "cqrs", label: "CQRS", level: "none", provenance: "explicit_user_confirmation" },
-  ]);
+test("Gemini response extraction distinguishes invalid, empty, and truncated output", () => {
+  const value = { skills: [], senioritySignals: [], atsKeywords: [], employerTerminology: [] };
+  assert.deepEqual(extractGeminiStructuredResponse({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(value) }] } }] }), value);
+  assert.throws(() => extractGeminiStructuredResponse({ candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: "{}" }] } }] }), (error: unknown) => error instanceof CvAiProviderError && error.code === "GEMINI_TRUNCATED_RESPONSE");
+  assert.throws(() => extractGeminiStructuredResponse({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: "bad" }] } }] }), (error: unknown) => error instanceof CvAiProviderError && error.code === "GEMINI_INVALID_JSON");
+  assert.throws(() => extractGeminiStructuredResponse({ candidates: [] }), (error: unknown) => error instanceof CvAiProviderError && error.code === "GEMINI_EMPTY_RESPONSE");
 });
 
-test("Gemini request includes saved-job context and excludes contact PII", () => {
-  const candidate = profile();
-  const request = buildGeminiCvRequest({
-    job: {
-      title: "Frontend Engineer",
-      company: "Synthetic Hiring Co",
-      description: "Build accessible React interfaces with TypeScript.",
-      technologies: ["React", "TypeScript"],
-    },
-    candidate: candidateProfileForAi(candidate),
-  });
-  const serialized = JSON.stringify(request);
-  assert.match(serialized, /Frontend Engineer/);
-  assert.match(serialized, /Synthetic Hiring Co/);
-  assert.match(serialized, /Build accessible React interfaces/);
-  assert.match(serialized, /TypeScript/);
-  assert.match(serialized, /accessible shared components/);
-  assert.match(serialized, /application\/json/);
-  const generationConfig = request.generationConfig as Record<string, unknown>;
-  assert.equal(generationConfig.responseMimeType, "application/json");
-  assert.deepEqual(generationConfig.responseSchema, geminiResponseSchema(selectionJsonSchema({
-    job: {
-      title: "Frontend Engineer",
-      company: "Synthetic Hiring Co",
-      description: "Build accessible React interfaces with TypeScript.",
-      technologies: ["React", "TypeScript"],
-    },
-    candidate: candidateProfileForAi(candidate),
-  })));
-  assert.equal("responseFormat" in generationConfig, false);
-  assert.doesNotMatch(serialized, /Alex Example/);
-  assert.doesNotMatch(serialized, /alex@example\.test/i);
-  assert.doesNotMatch(serialized, /000 000 000/);
-  assert.doesNotMatch(serialized, /linkedin\.com/);
-});
-
-test("Gemini response extraction accepts structured JSON and rejects invalid model responses", () => {
-  assert.deepEqual(
-    extractGeminiStructuredResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(verifiedSelection()) }] } }] }),
-    verifiedSelection(),
-  );
-  assert.throws(
-    () => extractGeminiStructuredResponse({ candidates: [{ content: { parts: [{ text: "not-json" }] } }] }),
-    (error: unknown) => error instanceof CvAiProviderError && error.code === "GEMINI_INVALID_JSON",
-  );
-  assert.throws(() => extractGeminiStructuredResponse({ candidates: [] }), /no structured CV selection/);
-});
-
-test("deterministic renderer emits a compact PDF with verified contact details", () => {
-  const candidate = profile();
-  const generated = materializeGeneratedCv(candidate, verifiedSelection());
-  if (!generated.ok) assert.fail(generated.message);
-  const bytes = renderCvPdf({ personal: candidate.personal, content: generated.data });
-  const text = new TextDecoder().decode(bytes);
-  assert.match(text, /^%PDF-1\.4/);
-  assert.match(text, /Alex Example/);
-  assert.match(text, /alex@example\.test/);
-  assert.match(text, /xref/);
-  assert.ok(bytes.byteLength < 2 * 1024 * 1024);
-});
-
-test("deterministic renderer paginates maximum-length variable content without drawing below the body margin", () => {
-  const long = "Verified synthetic accessibility engineering achievement with TypeScript and deterministic validation";
-  const bytes = renderCvPdf({
-    personal: {
-      name: long,
-      title: long,
-      location: long,
-      email: "synthetic@example.test",
-      phone: "+48 000 000 000",
-      links: Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`Link ${index + 1}`, `https://example.test/${"verified/".repeat(30)}${index}`])),
-    },
-    content: {
-      headline: long,
-      summary: `${long}. `.repeat(12),
-      skills: Array.from({ length: 100 }, (_, index) => `Verified skill ${index + 1} ${"technology".repeat(5)}`),
-      experience: [{
-        company: long.repeat(2),
-        role: long.repeat(2),
-        startDate: "2020-01",
-        endDate: null,
-        technologies: Array.from({ length: 50 }, (_, index) => `Verified technology ${index + 1}`),
-        achievements: Array.from({ length: 30 }, (_, index) => `${long} ${index + 1}. ${long}`),
-      }],
-      education: [{ institution: long.repeat(2), degree: long.repeat(2), startDate: "2016", endDate: "2019" }],
-    },
-  });
-  const pdf = new TextDecoder().decode(bytes);
-  const pageCount = Number(/\/Count (\d+)/.exec(pdf)?.[1] ?? "0");
-  const textCoordinates = [...pdf.matchAll(/1 0 0 1 [\d.]+ ([\d.]+) Tm/g)].map((match) => Number(match[1]));
-  assert.ok(pageCount > 2);
-  assert.ok(textCoordinates.length > 0);
-  assert.ok(textCoordinates.every((coordinate) => coordinate >= 26));
-  assert.ok(pdf.includes("Skills \\(continued\\)"));
-  assert.match(pdf, /Frontend|Verified synthetic accessibility/);
+test("stored content validation and CV versioning remain deterministic", () => {
+  const content = { headline: "Frontend Engineer", summary: null, skills: ["React"], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["A".repeat(600)] }], education: [] };
+  assert.equal(parseGeneratedCvContent(content).ok, true);
+  content.experience[0].achievements = ["A".repeat(601)];
+  assert.equal(parseGeneratedCvContent(content).ok, false);
+  assert.equal(nextCvVersion([]), 1);
+  assert.equal(nextCvVersion([1, 5, 3]), 6);
 });

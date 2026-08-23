@@ -6,7 +6,8 @@ export const MAX_RESUME_TEMPLATE_BYTES = 256 * 1024;
 export const RESUME_TEMPLATE_MIME_TYPE = "text/html";
 const SUPPORTED_TOKENS = new Set([
   "resume.name", "resume.title", "resume.location", "resume.email", "resume.phone", "resume.links",
-  "resume.headline", "resume.summary", "resume.skills", "resume.experience", "resume.education",
+  "resume.linkedin", "resume.github", "resume.headline", "resume.summary", "resume.professional_summary",
+  "resume.selected_impact", "resume.skills", "resume.skill_groups", "resume.experience", "resume.education",
 ]);
 const VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
 
@@ -51,7 +52,10 @@ export function validateResumeTemplateText(value: string): string {
   const tokens = [...value.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((match) => match[1].trim());
   const unsupportedToken = tokens.find((token) => !SUPPORTED_TOKENS.has(token));
   if (unsupportedToken) return `The template contains unsupported placeholder "{{${unsupportedToken}}}". Use the documented resume.* placeholders.`;
-  if (!tokens.includes("resume.name") || !tokens.includes("resume.experience")) return "The template must include {{resume.name}} and {{resume.experience}}.";
+  const legacyMarkers = [...value.matchAll(/<!--\s*([A-Z][A-Z0-9_]+)\s*-->/g)].map((match) => match[1]);
+  const unsupportedMarker = legacyMarkers.find((marker) => marker !== "SELECTED_IMPACT_ITEMS" && marker !== "SKILL_GROUPS" && !marker.endsWith("_BULLETS"));
+  if (unsupportedMarker) return `The template contains unsupported resume marker "${unsupportedMarker}".`;
+  if (!tokens.includes("resume.name") || (!tokens.includes("resume.experience") && !legacyMarkers.some((marker) => marker.endsWith("_BULLETS")))) return "The template must include {{resume.name}} and either {{resume.experience}} or legacy *_BULLETS markers.";
   return "";
 }
 
@@ -84,12 +88,47 @@ function skillsHtml(skills: string[]): string {
   return `<ul class="resume-skills">${skills.map((skill) => `<li>${escapeHtml(skill)}</li>`).join("")}</ul>`;
 }
 
+function skillGroupsHtml(skills: string[]): string {
+  if (skills.length === 0) return "";
+  return `<div class="skill-group"><h3 class="skill-title">Relevant skills</h3><div>${skills.map(escapeHtml).join(" · ")}</div></div>`;
+}
+
 function experienceHtml(content: GeneratedCvContent): string {
   return content.experience.map((experience) => `<section class="resume-experience-item"><h3>${escapeHtml(experience.role)} · ${escapeHtml(experience.company)}</h3><p class="resume-dates">${escapeHtml(dateRange(experience.startDate, experience.endDate))}</p><ul>${experience.achievements.map((achievement) => `<li>${escapeHtml(achievement)}</li>`).join("")}</ul></section>`).join("");
 }
 
 function educationHtml(content: GeneratedCvContent): string {
   return content.education.map((education) => `<section class="resume-education-item"><h3>${escapeHtml(education.degree ?? education.institution)}</h3><p>${escapeHtml(education.institution)}${education.startDate || education.endDate ? ` · ${escapeHtml(dateRange(education.startDate, education.endDate))}` : ""}</p></section>`).join("");
+}
+
+function selectedImpactHtml(content: GeneratedCvContent): string {
+  return content.experience
+    .flatMap((experience) => experience.achievements)
+    .slice(0, 4)
+    .map((achievement) => `<li>${escapeHtml(achievement)}</li>`)
+    .join("");
+}
+
+function linkValue(links: Record<string, string>, label: string): string {
+  const entry = Object.entries(links).find(([candidate]) => candidate.toLocaleLowerCase("en") === label.toLocaleLowerCase("en"));
+  return entry ? escapeHtml(entry[1]) : "";
+}
+
+function legacyExperienceMarkers(html: string, content: GeneratedCvContent): string {
+  const used = new Set<number>();
+  let fallbackIndex = 0;
+  return html.replace(/<!--\s*([A-Z][A-Z0-9_]*)_BULLETS\s*-->/g, (_match, marker: string) => {
+    const markerKey = marker.toLocaleLowerCase("en").replace(/[^a-z0-9]+/g, "");
+    let index = content.experience.findIndex((experience, candidateIndex) => {
+      const companyKey = experience.company.toLocaleLowerCase("en").replace(/[^a-z0-9]+/g, "");
+      return !used.has(candidateIndex) && (companyKey.includes(markerKey) || markerKey.includes(companyKey));
+    });
+    while (index < 0 && fallbackIndex < content.experience.length && used.has(fallbackIndex)) fallbackIndex += 1;
+    if (index < 0 && fallbackIndex < content.experience.length) index = fallbackIndex;
+    if (index < 0) return "";
+    used.add(index);
+    return content.experience[index].achievements.map((achievement) => `<li>${escapeHtml(achievement)}</li>`).join("");
+  });
 }
 
 export type ResumeTemplateRenderInput = {
@@ -109,14 +148,22 @@ export function renderResumeTemplate(templateHtml: string, input: ResumeTemplate
     "resume.email": escapeHtml(input.personal.email ?? ""),
     "resume.phone": escapeHtml(input.personal.phone ?? ""),
     "resume.links": linksHtml(input.personal.links),
+    "resume.linkedin": linkValue(input.personal.links, "LinkedIn"),
+    "resume.github": linkValue(input.personal.links, "GitHub"),
     "resume.headline": escapeHtml(input.content.headline ?? ""),
     "resume.summary": escapeHtml(input.content.summary ?? ""),
+    "resume.professional_summary": escapeHtml(input.content.summary ?? ""),
+    "resume.selected_impact": selectedImpactHtml(input.content),
     "resume.skills": skillsHtml(input.content.skills),
+    "resume.skill_groups": skillGroupsHtml(input.content.skills),
     "resume.experience": experienceHtml(input.content),
     "resume.education": educationHtml(input.content),
   };
-  const rendered = templateHtml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, token: string) => values[token.trim()] ?? "");
-  if (/\{\{[^}]+\}\}/.test(rendered)) throw new Error("The HTML template contains an unresolved placeholder.");
+  let rendered = templateHtml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, token: string) => values[token.trim()] ?? "");
+  rendered = rendered.replace(/<!--\s*SELECTED_IMPACT_ITEMS\s*-->/g, selectedImpactHtml(input.content));
+  rendered = rendered.replace(/<!--\s*SKILL_GROUPS\s*-->/g, skillGroupsHtml(input.content.skills));
+  rendered = legacyExperienceMarkers(rendered, input.content);
+  if (/\{\{[^}]+\}\}/.test(rendered) || /<!--\s*(?:SELECTED_IMPACT_ITEMS|SKILL_GROUPS|[A-Z][A-Z0-9_]*_BULLETS)\s*-->/.test(rendered)) throw new Error("The HTML template contains an unresolved resume placeholder.");
   return rendered;
 }
 

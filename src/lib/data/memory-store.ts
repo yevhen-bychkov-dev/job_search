@@ -127,8 +127,10 @@ function publicTemplate(record: StoredTemplate): ResumeTemplate {
 }
 
 function publicGeneration(record: StoredGeneration): ResumeGeneration {
-  return { id: record.id, jobId: record.jobId, status: record.status, idempotencyKey: record.idempotencyKey, analysis: structuredClone(record.analysis), confirmations: structuredClone(record.confirmations), strategy: structuredClone(record.strategy), generatedContent: structuredClone(record.generatedContent), critique: structuredClone(record.critique), correction: structuredClone(record.correction), currentStage: record.currentStage, attemptCount: record.attemptCount, nextRetryAt: record.nextRetryAt, errorCode: record.errorCode, templateVersion: record.templateVersion, createdAt: record.createdAt, updatedAt: record.updatedAt };
+  return { id: record.id, jobId: record.jobId, status: record.status, idempotencyKey: record.idempotencyKey, analysis: structuredClone(record.analysis), approvedSkills: structuredClone(record.approvedSkills), generatedContent: structuredClone(record.generatedContent), currentStage: record.currentStage, attemptCount: record.attemptCount, nextRetryAt: record.nextRetryAt, leaseExpiresAt: record.leaseExpiresAt, errorCode: record.errorCode, templateVersion: record.templateVersion, aiProvider: record.aiProvider, aiModel: record.aiModel, createdAt: record.createdAt, updatedAt: record.updatedAt };
 }
+
+const ACTIVE_GENERATION_STATUSES = new Set(["analyzing", "awaiting_confirmation", "strategizing", "generating", "critiquing", "correcting", "rendering", "retrying"]);
 
 export class MemoryAppStore implements AppStore {
   async listJobs(userId: string, query: JobQuery = {}): Promise<Job[]> {
@@ -416,24 +418,26 @@ export class MemoryAppStore implements AppStore {
 
   async getJobResumeRequirements(userId: string, jobId: string): Promise<JobResumeRequirements | null> {
     const found = state().jobRequirements.find((candidate) => candidate.userId === userId && candidate.jobId === jobId);
-    return found ? { analysis: structuredClone(found.analysis), requirements: structuredClone(found.requirements), updatedAt: found.updatedAt } : null;
+    return found ? { analysis: structuredClone(found.analysis), requirements: structuredClone(found.requirements), approvedAt: found.approvedAt ?? null, updatedAt: found.updatedAt } : null;
   }
 
-  async saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[] }): Promise<JobResumeRequirements> {
+  async saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[]; approvedAt: string | null }): Promise<JobResumeRequirements> {
     if (!state().jobs.some((job) => job.userId === userId && job.id === jobId)) throw new ResourceNotFoundError("Job");
     const updatedAt = new Date().toISOString();
     const existing = state().jobRequirements.find((candidate) => candidate.userId === userId && candidate.jobId === jobId);
-    if (existing) Object.assign(existing, { analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), updatedAt });
-    else state().jobRequirements.push({ userId, jobId, analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), updatedAt });
-    return { analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), updatedAt };
+    if (existing) Object.assign(existing, { analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), approvedAt: input.approvedAt, updatedAt });
+    else state().jobRequirements.push({ userId, jobId, analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), approvedAt: input.approvedAt, updatedAt });
+    return { analysis: structuredClone(input.analysis), requirements: structuredClone(input.requirements), approvedAt: input.approvedAt, updatedAt };
   }
 
   async createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration> {
     if (!state().jobs.some((job) => job.userId === userId && job.id === jobId)) throw new ResourceNotFoundError("Job");
     const existing = state().generations.find((generation) => generation.userId === userId && generation.jobId === jobId && generation.idempotencyKey === idempotencyKey);
     if (existing) return publicGeneration(existing);
+    const active = state().generations.find((generation) => generation.userId === userId && generation.jobId === jobId && ACTIVE_GENERATION_STATUSES.has(generation.status));
+    if (active) return publicGeneration(active);
     const now = new Date().toISOString();
-    const stored: StoredGeneration = { id: crypto.randomUUID(), userId, jobId, idempotencyKey, status: "analyzing", analysis: null, confirmations: [], strategy: null, generatedContent: null, critique: null, correction: null, currentStage: null, attemptCount: 0, nextRetryAt: null, errorCode: null, templateVersion: null, createdAt: now, updatedAt: now };
+    const stored: StoredGeneration = { id: crypto.randomUUID(), userId, jobId, idempotencyKey, status: "analyzing", analysis: null, approvedSkills: [], generatedContent: null, currentStage: null, attemptCount: 0, nextRetryAt: null, leaseExpiresAt: null, errorCode: null, templateVersion: null, aiProvider: null, aiModel: null, createdAt: now, updatedAt: now };
     state().generations.push(stored);
     return publicGeneration(stored);
   }
@@ -452,6 +456,22 @@ export class MemoryAppStore implements AppStore {
     const generation = state().generations.find((candidate) => candidate.userId === userId && candidate.id === id);
     if (!generation) throw new ResourceNotFoundError("Resume generation");
     Object.assign(generation, input, { updatedAt: new Date(Math.max(Date.now(), new Date(generation.updatedAt).getTime() + 1)).toISOString() });
+    return publicGeneration(generation);
+  }
+
+  async claimResumeGeneration(userId: string, id: string, input: Parameters<AppStore["claimResumeGeneration"]>[2]): Promise<ResumeGeneration | null> {
+    const generation = state().generations.find((candidate) => candidate.userId === userId && candidate.id === id);
+    if (!generation) throw new ResourceNotFoundError("Resume generation");
+    if (generation.updatedAt !== input.expectedUpdatedAt || (generation.leaseExpiresAt && Date.parse(generation.leaseExpiresAt) > Date.now())) return null;
+    Object.assign(generation, {
+      status: input.status,
+      currentStage: input.currentStage,
+      leaseExpiresAt: input.leaseExpiresAt,
+      ...(input.analysis === undefined ? {} : { analysis: structuredClone(input.analysis) }),
+      ...(input.approvedSkills === undefined ? {} : { approvedSkills: structuredClone(input.approvedSkills) }),
+      ...(input.templateVersion === undefined ? {} : { templateVersion: input.templateVersion }),
+      updatedAt: new Date(Math.max(Date.now(), new Date(generation.updatedAt).getTime() + 1)).toISOString(),
+    });
     return publicGeneration(generation);
   }
 

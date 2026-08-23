@@ -32,7 +32,7 @@ export function ResumeTemplateForm() {
       <div className="field">
         <label htmlFor="resumeTemplate">Import HTML resume template</label>
         <input id="resumeTemplate" name="file" type="file" required accept=".html,.htm,text/html" />
-        <p className="field-help">Use the documented placeholders. Maximum 256 KB; scripts, remote assets, and event handlers are rejected.</p>
+        <p className="field-help">Maximum 256 KB. Supported text placeholders include <code>{"{{resume.name}}"}</code>, <code>{"{{resume.title}}"}</code>, <code>{"{{resume.professional_summary}}"}</code>, <code>{"{{resume.skills}}"}</code>, and <code>{"{{resume.experience}}"}</code>. Legacy <code>SELECTED_IMPACT_ITEMS</code>, <code>SKILL_GROUPS</code>, and company <code>*_BULLETS</code> comment markers are also supported. Scripts, remote assets, and event handlers are rejected.</p>
       </div>
       <button className="button button-primary" type="submit" disabled={pending}>{pending ? "Saving…" : "Save template"}</button>
       {message ? <p className={`alert alert-${message.ok ? "success" : "error"}`} role={message.ok ? "status" : "alert"}>{message.text}</p> : null}

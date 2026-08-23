@@ -2,8 +2,8 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
-import { nextCvVersion, parseGeneratedCvContent } from "@/features/cvs/domain";
-import type { GeneratedCv, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, ResumeStrategy, ResumeCritique, GeneratedCvContent, ResumeAiStage, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
+import { nextCvVersion, parseGeneratedCvContent, parseVacancyAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
+import type { ApprovedResumeSkill, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import { parseCandidateProfileBytes, type CandidateProfile } from "@/features/knowledge/candidate-profile";
@@ -14,6 +14,7 @@ import { reportUnexpectedError } from "@/lib/server-errors";
 
 import {
   type AppStore,
+  ArtifactPersistenceError,
   ConcurrentModificationError,
   DataConsistencyError,
   DuplicateJobError,
@@ -25,7 +26,8 @@ import {
 
 type JobRow = Awaited<ReturnType<typeof getJobRows>>[number];
 
-const RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,strategy_json,generation_json,critique_json,correction_json,current_stage,attempt_count,next_retry_at,error_code,template_version,created_at,updated_at";
+const RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,generation_json,current_stage,attempt_count,next_retry_at,lease_expires_at,error_code,template_version,ai_provider,ai_model,created_at,updated_at";
+const ACTIVE_GENERATION_STATUSES: ResumeGenerationStatus[] = ["analyzing", "awaiting_confirmation", "strategizing", "generating", "critiquing", "correcting", "rendering", "retrying"];
 
 async function getJobRows(userId: string) {
   const supabase = await createServerSupabaseClient();
@@ -588,23 +590,26 @@ export class SupabaseAppStore implements AppStore {
 
   async getJobResumeRequirements(userId: string, jobId: string): Promise<JobResumeRequirements | null> {
     const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("job_resume_requirements").select("analysis_json,requirements_json,updated_at").eq("user_id", userId).eq("job_id", jobId).maybeSingle();
+    const { data, error } = await supabase.from("job_resume_requirements").select("analysis_json,requirements_json,approved_at,updated_at").eq("user_id", userId).eq("job_id", jobId).maybeSingle();
     if (error) throw new Error(`Unable to load job resume requirements: ${error.message}`);
     if (!data) return null;
-    return { analysis: data.analysis_json as VacancyAnalysis, requirements: data.requirements_json as SavedJobRequirement[], updatedAt: data.updated_at };
+    const analysis = parseVacancyAnalysis(data.analysis_json);
+    const requirements = validateSavedJobRequirements(data.requirements_json);
+    if (!analysis.ok || !requirements.ok) throw new DataConsistencyError("Stored resume skill suggestions are invalid.");
+    return { analysis: analysis.data, requirements: requirements.data, approvedAt: data.approved_at, updatedAt: data.updated_at };
   }
 
-  async saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[] }): Promise<JobResumeRequirements> {
+  async saveJobResumeRequirements(userId: string, jobId: string, input: { analysis: VacancyAnalysis; requirements: SavedJobRequirement[]; approvedAt: string | null }): Promise<JobResumeRequirements> {
     const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("job_resume_requirements").upsert({ user_id: userId, job_id: jobId, analysis_json: input.analysis as unknown as Json, requirements_json: input.requirements as unknown as Json }, { onConflict: "job_id" }).select("analysis_json,requirements_json,updated_at").single();
+    const { data, error } = await supabase.from("job_resume_requirements").upsert({ user_id: userId, job_id: jobId, analysis_json: input.analysis as unknown as Json, requirements_json: input.requirements as unknown as Json, approved_at: input.approvedAt }, { onConflict: "job_id" }).select("analysis_json,requirements_json,approved_at,updated_at").single();
     if (error) throw new Error(`Unable to save job resume requirements: ${error.message}`);
-    return { analysis: data.analysis_json as VacancyAnalysis, requirements: data.requirements_json as SavedJobRequirement[], updatedAt: data.updated_at };
+    return { analysis: data.analysis_json as VacancyAnalysis, requirements: data.requirements_json as SavedJobRequirement[], approvedAt: data.approved_at, updatedAt: data.updated_at };
   }
 
-  private toResumeGeneration(row: { id: string; job_id: string; status: ResumeGenerationStatus; idempotency_key: string; analysis_json: Json | null; confirmations_json: Json; strategy_json: Json | null; generation_json: Json | null; critique_json: Json | null; correction_json: Json | null; current_stage: string | null; attempt_count: number; next_retry_at: string | null; error_code: string | null; template_version: number | null; created_at: string; updated_at: string }): ResumeGeneration {
+  private toResumeGeneration(row: { id: string; job_id: string; status: ResumeGenerationStatus; idempotency_key: string; analysis_json: Json | null; confirmations_json: Json; generation_json: Json | null; current_stage: string | null; attempt_count: number; next_retry_at: string | null; lease_expires_at: string | null; error_code: string | null; template_version: number | null; ai_provider: string | null; ai_model: string | null; created_at: string; updated_at: string }): ResumeGeneration {
     const analysis = row.analysis_json as VacancyAnalysis | null;
-    const confirmations = row.confirmations_json as ResumeConfirmation[];
-    return { id: row.id, jobId: row.job_id, status: row.status, idempotencyKey: row.idempotency_key, analysis, confirmations, strategy: row.strategy_json as ResumeStrategy | null, generatedContent: row.generation_json as GeneratedCvContent | null, critique: row.critique_json as ResumeCritique | null, correction: row.correction_json as GeneratedCvContent | null, currentStage: row.current_stage as ResumeAiStage | null, attemptCount: row.attempt_count, nextRetryAt: row.next_retry_at, errorCode: row.error_code, templateVersion: row.template_version, createdAt: row.created_at, updatedAt: row.updated_at };
+    const approvedSkills = row.confirmations_json as ApprovedResumeSkill[];
+    return { id: row.id, jobId: row.job_id, status: row.status, idempotencyKey: row.idempotency_key, analysis, approvedSkills, generatedContent: row.generation_json as GeneratedCvContent | null, currentStage: row.current_stage === "render" ? "render" : row.current_stage === null ? null : "generation", attemptCount: row.attempt_count, nextRetryAt: row.next_retry_at, leaseExpiresAt: row.lease_expires_at, errorCode: row.error_code, templateVersion: row.template_version, aiProvider: row.ai_provider, aiModel: row.ai_model, createdAt: row.created_at, updatedAt: row.updated_at };
   }
 
   async createResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<ResumeGeneration> {
@@ -613,9 +618,13 @@ export class SupabaseAppStore implements AppStore {
     const created = await supabase.from("resume_generations").insert({ user_id: userId, job_id: jobId, idempotency_key: idempotencyKey, status: "analyzing", confirmations_json: [] }).select(RESUME_GENERATION_SELECT).maybeSingle();
     if (!created.error && created.data) return this.toResumeGeneration(created.data);
     if (created.error?.code !== "23505") throw new Error(`Unable to create resume generation: ${created.error?.message ?? "unknown error"}`);
-    const existing = await supabase.from("resume_generations").select(RESUME_GENERATION_SELECT).eq("user_id", userId).eq("job_id", jobId).eq("idempotency_key", idempotencyKey).single();
+    const existing = await supabase.from("resume_generations").select(RESUME_GENERATION_SELECT).eq("user_id", userId).eq("job_id", jobId).eq("idempotency_key", idempotencyKey).maybeSingle();
     if (existing.error) throw new Error(`Unable to load existing resume generation: ${existing.error.message}`);
-    return this.toResumeGeneration(existing.data);
+    if (existing.data) return this.toResumeGeneration(existing.data);
+    const active = await supabase.from("resume_generations").select(RESUME_GENERATION_SELECT).eq("user_id", userId).eq("job_id", jobId).in("status", ACTIVE_GENERATION_STATUSES).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (active.error) throw new Error(`Unable to load the active resume generation: ${active.error.message}`);
+    if (!active.data) throw new Error("A concurrent resume generation could not be recovered.");
+    return this.toResumeGeneration(active.data);
   }
 
   async getResumeGeneration(userId: string, id: string): Promise<ResumeGeneration | null> {
@@ -636,19 +645,44 @@ export class SupabaseAppStore implements AppStore {
     const supabase = await createServerSupabaseClient();
     const update: Database["public"]["Tables"]["resume_generations"]["Update"] = { status: input.status };
     if (input.analysis !== undefined) update.analysis_json = input.analysis as unknown as Json;
-    if (input.confirmations !== undefined) update.confirmations_json = input.confirmations as unknown as Json;
-    if (input.strategy !== undefined) update.strategy_json = input.strategy as unknown as Json | null;
+    if (input.approvedSkills !== undefined) update.confirmations_json = input.approvedSkills as unknown as Json;
     if (input.generatedContent !== undefined) update.generation_json = input.generatedContent as unknown as Json | null;
-    if (input.critique !== undefined) update.critique_json = input.critique as unknown as Json | null;
-    if (input.correction !== undefined) update.correction_json = input.correction as unknown as Json | null;
     if (input.currentStage !== undefined) update.current_stage = input.currentStage;
     if (input.attemptCount !== undefined) update.attempt_count = input.attemptCount;
     if (input.nextRetryAt !== undefined) update.next_retry_at = input.nextRetryAt;
+    if (input.leaseExpiresAt !== undefined) update.lease_expires_at = input.leaseExpiresAt;
     if (input.errorCode !== undefined) update.error_code = input.errorCode;
     if (input.templateVersion !== undefined) update.template_version = input.templateVersion;
+    if (input.aiProvider !== undefined) update.ai_provider = input.aiProvider;
+    if (input.aiModel !== undefined) update.ai_model = input.aiModel;
     const { data, error } = await supabase.from("resume_generations").update(update).eq("user_id", userId).eq("id", id).select(RESUME_GENERATION_SELECT).single();
     if (error) throw new Error(`Unable to update resume generation: ${error.message}`);
     return this.toResumeGeneration(data);
+  }
+
+  async claimResumeGeneration(userId: string, id: string, input: Parameters<AppStore["claimResumeGeneration"]>[2]): Promise<ResumeGeneration | null> {
+    const supabase = await createServerSupabaseClient();
+    const now = new Date().toISOString();
+    const update: Database["public"]["Tables"]["resume_generations"]["Update"] = {
+      status: input.status,
+      current_stage: input.currentStage,
+      lease_expires_at: input.leaseExpiresAt,
+      next_retry_at: null,
+      error_code: null,
+    };
+    if (input.analysis !== undefined) update.analysis_json = input.analysis as unknown as Json;
+    if (input.approvedSkills !== undefined) update.confirmations_json = input.approvedSkills as unknown as Json;
+    if (input.templateVersion !== undefined) update.template_version = input.templateVersion;
+    const { data, error } = await supabase.from("resume_generations")
+      .update(update)
+      .eq("user_id", userId)
+      .eq("id", id)
+      .eq("updated_at", input.expectedUpdatedAt)
+      .or(`lease_expires_at.is.null,lease_expires_at.lt.${now}`)
+      .select(RESUME_GENERATION_SELECT)
+      .maybeSingle();
+    if (error) throw new Error(`Unable to claim resume generation stage: ${error.message}`);
+    return data ? this.toResumeGeneration(data) : null;
   }
 
   async listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]> {
@@ -676,18 +710,18 @@ export class SupabaseAppStore implements AppStore {
       contentType: "application/pdf",
       upsert: false,
     });
-    if (upload.error) throw new Error(`Unable to upload generated CV: ${upload.error.message}`);
+    if (upload.error) throw new ArtifactPersistenceError("upload", "Unable to upload the generated CV.", { cause: upload.error });
 
     const removeUploadedObject = async (): Promise<void> => {
       const cleanup = await supabase.storage.from("generated-cvs").remove([objectPath]);
       if (cleanup.error) {
         reportUnexpectedError("cvs.create.compensation", cleanup.error);
-        throw new DataConsistencyError("The uploaded PDF could not be cleaned up.");
+        throw new ArtifactPersistenceError("cleanup", "The uploaded PDF could not be cleaned up.", { cause: cleanup.error });
       }
     };
     const cleanupUpload = async (reason: string): Promise<never> => {
       await removeUploadedObject();
-      throw new Error(reason);
+      throw new ArtifactPersistenceError("metadata", reason);
     };
 
     for (let attempt = 0; attempt < 5; attempt += 1) {

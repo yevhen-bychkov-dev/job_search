@@ -66,15 +66,15 @@ External job boards are isolated behind a common adapter boundary, allowing addi
 
 The resume generation flow is intentionally designed to reduce hallucinations while producing strong professional framing.
 
-The application maintains a validated **Candidate Profile** as the factual source of truth and separates CV work into resumable stages. Gemini first analyzes a vacancy and the user edits, approves, adds, or removes requirements in the job card; that requirement set is saved per job. Later CV generations reuse that saved set and do not re-run vacancy analysis. The generation pipeline then creates a vacancy-specific Resume Strategy, generates structured ResumeContent from that strategy, critiques it, performs at most one correction pass when the score is below the configured threshold or a high-severity issue exists, and finally renders the deterministic HTML template to PDF.
+The application maintains a validated **Candidate Profile** as the factual source of truth. Gemini first extracts vacancy-only skill suggestions using constrained JSON Schema output. Application code supplements configured technologies, matches the suggestions to verified profile evidence, and saves the result as a draft. The user can add, edit, remove, and classify every retained skill before explicitly approving the set. Later resume versions reuse that approved snapshot and do not repeat vacancy analysis.
 
-Before AI requests, personal contact information is removed. Each final bullet cites source achievement IDs, so the server can allow safe senior inference such as framing a verified end-to-end build as designed and implemented while rejecting unsupported leadership, metrics, or impact claims. The master resume is treated as factual source material rather than wording to preserve, and supported or confirmed high-priority requirements are checked for coverage after generation. Missing evidence is unconfirmed, not “no experience”; only material unknowns are shown for confirmation.
+Before content generation, personal contact information is removed. Each final bullet cites source achievement IDs. Unsupported leadership, metrics, impact claims, HTML, and facts outside the Candidate Profile fall back to verified source text. Familiar skills remain visibly familiar and no-experience skills cannot become claims.
 
 The application validates the structured content against the original profile, inserts it into the user's validated HTML template, and generates the PDF with Chromium. Personal contact details are injected during trusted template rendering.
 
 This means the model does not control contact details, arbitrary work history, HTML, CSS, or the final PDF layout. A job’s saved requirements are reusable input for every later CV version for that job.
 
-Each completed resume is stored as an immutable version associated with the corresponding job. Strategy, generation, critique, correction, and retry metadata are persisted on the generation operation so 429/5xx failures resume at the failed stage. Gemini requests use bounded exponential backoff with jitter, honor `Retry-After`, and are serialized through a low-concurrency queue. Incomplete and failed generation attempts remain lifecycle records and never appear in normal resume history.
+Each completed resume is stored as an immutable version associated with the job and exact template version. Structured-content generation and PDF rendering are separate leased stages, so an interrupted or failed render can be retried without another Gemini call. One database invariant permits only one active generation per user/job. Each Gemini call makes one primary attempt and at most one infrastructure retry/fallback; 429 responses are never amplified. Incomplete and failed attempts remain lifecycle records and never appear in normal resume history.
 
 ## Job discovery
 
@@ -141,7 +141,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Configure the required Supabase environment values and Gemini API key in `.env.local`. When `GEMINI_MODEL=gemini-3.7-flash`, persistent capacity-related HTTP 503 responses automatically fall back to `gemini-3.6-flash`; set `GEMINI_FALLBACK_MODEL` to override that server-only fallback.
+Configure the required Supabase environment values and Gemini API key in `.env.local`. `GEMINI_FALLBACK_MODEL` is optional and is used only for the single bounded retry after an infrastructure failure; quota/rate-limit responses are not retried automatically.
 
 To test the application locally without Supabase, Docker, external credentials, or real data, run:
 

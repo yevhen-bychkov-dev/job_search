@@ -1,12 +1,3 @@
-import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
-
-export type CvSelection = {
-  includeSummary: boolean;
-  skillOrder: string[];
-  experience: Array<{ experienceId: string; achievementIds: string[] }>;
-  educationIds: string[];
-};
-
 export type GeneratedCvContent = {
   headline: string | null;
   summary: string | null;
@@ -27,38 +18,7 @@ export type GeneratedCvContent = {
   }>;
 };
 
-export type ResumeAiStage = "analysis" | "strategy" | "generation" | "critique" | "correction" | "render";
-
-export type ResumeStrategy = {
-  targetPositioning: string;
-  topHiringSignals: Array<{ signal: string; priority: "high" | "medium" | "low" }>;
-  evidenceToSurface: Array<{ factId?: string; description: string; supports: string[] }>;
-  skillsToPrioritize: string[];
-  skillsToInclude: string[];
-  experienceThemes: string[];
-  seniorityNarrative: string[];
-  terminologyToUse: string[];
-  itemsToDeEmphasize: string[];
-  unsupportedRequirements: string[];
-  summaryDirection: string;
-  experienceDirections: Array<{ company?: string; goals: string[] }>;
-};
-
-export type ResumeCritiqueProblem = {
-  type: "missing_requirement" | "weak_seniority" | "generic_summary" | "master_resume_similarity" | "missing_skill" | "poor_prioritization" | "unsupported_claim" | "keyword_stuffing" | "weak_bullet" | "other";
-  severity: "high" | "medium" | "low";
-  description: string;
-  suggestedFix?: string;
-};
-
-export type ResumeCritique = {
-  score: number;
-  passes: boolean;
-  problems: ResumeCritiqueProblem[];
-  missingSupportedRequirements: string[];
-  unsupportedClaims: string[];
-  strengths: string[];
-};
+export type ResumeAiStage = "generation" | "render";
 
 export type GeneratedCv = {
   id: string;
@@ -72,6 +32,9 @@ export type GeneratedCv = {
   createdAt: string;
 };
 
+// Legacy statuses remain readable because existing rows may contain them. New
+// work uses only analyzing, generating, rendering, completed, failed,
+// rate_limited, and cancelled.
 export const RESUME_GENERATION_STATUSES = [
   "analyzing",
   "awaiting_confirmation",
@@ -96,7 +59,7 @@ export type JobRequirementLevel = (typeof JOB_REQUIREMENT_LEVELS)[number];
 export type VacancyRequirement = {
   key: string;
   label: string;
-  category: "technical" | "tooling" | "architecture" | "domain" | "responsibility" | "collaboration" | "leadership";
+  category: "technical" | "tooling" | "architecture" | "domain" | "responsibility" | "ownership" | "collaboration" | "leadership";
   importance: "must_have" | "nice_to_have";
   status: "supported" | "unconfirmed" | "confirmed_familiar" | "confirmed_none";
   evidence: string[];
@@ -117,19 +80,15 @@ export type VacancyAnalysis = {
   employerTerminology: string[];
 };
 
-export type ResumeConfirmation = {
+export type ApprovedResumeSkill = {
   key: string;
   label: string;
   level: ResumeConfirmationLevel;
   provenance: "existing_kb" | "explicit_user_confirmation";
 };
 
-export type ResumeConfirmationQuestion = {
-  key: string;
-  label: string;
-  category: VacancyRequirement["category"];
-  importance: VacancyRequirement["importance"];
-};
+// Kept as an alias for stored database JSON created by earlier revisions.
+export type ResumeConfirmation = ApprovedResumeSkill;
 
 export const VACANCY_REQUIREMENT_SECTIONS = [
   "mustHaveTechnical",
@@ -154,6 +113,7 @@ export type JobResumeRequirements = {
   analysis: VacancyAnalysis;
   requirements: SavedJobRequirement[];
   updatedAt: string;
+  approvedAt: string | null;
 };
 
 export type ResumeGeneration = {
@@ -162,25 +122,25 @@ export type ResumeGeneration = {
   status: ResumeGenerationStatus;
   idempotencyKey: string;
   analysis: VacancyAnalysis | null;
-  confirmations: ResumeConfirmation[];
-  strategy: ResumeStrategy | null;
+  approvedSkills: ApprovedResumeSkill[];
   generatedContent: GeneratedCvContent | null;
-  critique: ResumeCritique | null;
-  correction: GeneratedCvContent | null;
   currentStage: ResumeAiStage | null;
   attemptCount: number;
   nextRetryAt: string | null;
+  leaseExpiresAt: string | null;
   errorCode: string | null;
   templateVersion: number | null;
+  aiProvider: string | null;
+  aiModel: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
 export type CvActionState = {
-  status: "idle" | "confirmation" | "success" | "error";
+  status: "idle" | "in_progress" | "ready_to_render" | "success" | "error";
   message: string;
   generationId?: string;
-  questions?: ResumeConfirmationQuestion[];
+  stage?: ResumeAiStage;
 };
 
 export type RequirementsActionState = {
@@ -188,12 +148,8 @@ export type RequirementsActionState = {
   message: string;
   requirements?: SavedJobRequirement[];
   analysis?: VacancyAnalysis;
+  approvedAt?: string | null;
 };
 
 export const INITIAL_CV_ACTION_STATE: CvActionState = { status: "idle", message: "" };
 export const INITIAL_REQUIREMENTS_ACTION_STATE: RequirementsActionState = { status: "idle", message: "" };
-
-export type CvRenderInput = {
-  personal: CandidateProfile["personal"];
-  content: GeneratedCvContent;
-};
