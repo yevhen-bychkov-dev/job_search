@@ -23,7 +23,7 @@ export async function fetchGeminiWithFallback(
   primaryModel: string,
   fallbackModel: string | null,
   endpointForModel: (model: string) => string,
-  init: () => RequestInit,
+  init: (model: string) => RequestInit,
   waitImplementation: Wait = wait,
   metadata: GeminiRetryMetadata = {},
 ): Promise<{ response: Response; model: string; attempts: number }> {
@@ -33,7 +33,7 @@ export async function fetchGeminiWithFallback(
   for (let index = 0; index < models.length; index += 1) {
     const model = models[index];
     try {
-      const response = await fetchImplementation(endpointForModel(model), init());
+      const response = await fetchImplementation(endpointForModel(model), init(model));
       const canRetry = index === 0 && isRetryableGeminiStatus(response.status);
       if (!canRetry) return { response, model, attempts: index + 1 };
       console.info(JSON.stringify({ event: "resume.gemini.retry", ...metadata, attempt: 1, nextAttempt: 2, responseStatus: Math.floor(response.status / 100) * 100, retryModel: models[1] }));

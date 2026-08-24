@@ -47,5 +47,11 @@ export function createCvAiProvider(): CvAiProvider {
     : model === "gemini-3.7-flash"
       ? "gemini-3.6-flash"
       : null;
-  return new GeminiCvProvider(model, requiredEnvironment("GEMINI_API_KEY"), fallbackModel);
+  const configuredAnalysis = process.env.GEMINI_ANALYSIS_MODEL?.trim();
+  const analysisModel = configuredAnalysis && configuredAnalysis !== "PASTE_HERE"
+    ? validModel("GEMINI_ANALYSIS_MODEL", configuredAnalysis)
+    : model === "gemini-3.7-flash"
+      ? "gemini-3.5-flash-lite"
+      : model;
+  return new GeminiCvProvider(model, requiredEnvironment("GEMINI_API_KEY"), fallbackModel, analysisModel);
 }

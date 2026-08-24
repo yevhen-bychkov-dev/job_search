@@ -5,8 +5,8 @@ import { CvAiProviderError, extractGeminiStructuredResponse } from "../provider.
 import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
 import { fetchGeminiWithFallback, isGeminiTimeout } from "../gemini-retry.ts";
 
-const ANALYSIS_TIMEOUT_MS = 30_000;
-const GENERATION_TIMEOUT_MS = 75_000;
+const ANALYSIS_TIMEOUT_MS = 45_000;
+const GENERATION_TIMEOUT_MS = 100_000;
 
 function tokenUsage(payload: unknown): Record<string, number | null> {
   if (typeof payload !== "object" || payload === null || !("usageMetadata" in payload)) return {};
@@ -24,6 +24,7 @@ function tokenUsage(payload: unknown): Record<string, number | null> {
 export class GeminiCvProvider implements CvAiProvider {
   readonly providerId = "gemini";
   private readonly primaryModel: string;
+  private readonly analysisModel: string;
   private readonly fallbackModel: string | null;
   private selectedModel: string;
   private readonly apiKey: string;
@@ -33,9 +34,11 @@ export class GeminiCvProvider implements CvAiProvider {
     model: string,
     apiKey: string,
     fallbackModel: string | null = null,
+    analysisModel: string = model,
     fetchImplementation: typeof fetch = fetch,
   ) {
     this.primaryModel = model;
+    this.analysisModel = analysisModel;
     this.fallbackModel = fallbackModel;
     this.selectedModel = model;
     this.apiKey = apiKey;
@@ -46,26 +49,27 @@ export class GeminiCvProvider implements CvAiProvider {
     return this.selectedModel;
   }
 
-  private async request(body: Record<string, unknown>, timeoutMs: number, context?: ResumeAiContext): Promise<unknown> {
+  private async request(primaryModel: string, bodyForModel: (model: string) => Record<string, unknown>, timeoutMs: number, context?: ResumeAiContext): Promise<unknown> {
     const startedAt = Date.now();
-    const serializedBody = JSON.stringify(body);
-    const metadata = { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown", model: this.selectedModel, requestBytes: new TextEncoder().encode(serializedBody).byteLength, timeoutMs };
+    const deadline = startedAt + timeoutMs;
+    const primaryBody = JSON.stringify(bodyForModel(primaryModel));
+    const metadata = { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown", model: primaryModel, requestBytes: new TextEncoder().encode(primaryBody).byteLength, timeoutMs };
     let response: Response;
     let attempts = 1;
     try {
       const result = await fetchGeminiWithFallback(
         this.fetchImplementation,
-        this.primaryModel,
+        primaryModel,
         this.fallbackModel,
         (model) => `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-        () => ({
+        (model) => ({
           method: "POST",
           headers: {
             "content-type": "application/json",
             "x-goog-api-key": this.apiKey,
           },
-          body: serializedBody,
-          signal: AbortSignal.timeout(timeoutMs),
+          body: JSON.stringify(bodyForModel(model)),
+          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
         }),
         undefined,
         { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown" },
@@ -105,10 +109,10 @@ export class GeminiCvProvider implements CvAiProvider {
   }
 
   async analyzeVacancy(input: AnalyzeVacancyInput, context?: ResumeAiContext): Promise<unknown> {
-    return this.request(buildGeminiAnalysisRequest(input), ANALYSIS_TIMEOUT_MS, context);
+    return this.request(this.analysisModel, (model) => buildGeminiAnalysisRequest(input, model), ANALYSIS_TIMEOUT_MS, context);
   }
 
   async generateCv(input: GenerateCvInput, context?: ResumeAiContext): Promise<unknown> {
-    return this.request(buildGeminiResumeRequest(input), GENERATION_TIMEOUT_MS, context);
+    return this.request(this.primaryModel, (model) => buildGeminiResumeRequest(input, model), GENERATION_TIMEOUT_MS, context);
   }
 }

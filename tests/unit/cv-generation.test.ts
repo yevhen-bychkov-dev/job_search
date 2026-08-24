@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../../src/features/cvs/ai/gemini-request.ts";
+import { buildGeminiAnalysisRequest, buildGeminiResumeRequest, geminiThinkingLevelForStage } from "../../src/features/cvs/ai/gemini-request.ts";
 import { fetchGeminiWithFallback, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse, resumeContentJsonSchema, skillSuggestionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
 import { nextCvVersion, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
@@ -49,22 +49,40 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.doesNotMatch(JSON.stringify(resumeRequest), /alex@example\.test|Alex Example|linkedin\.com/i);
 });
 
+test("Gemini thinking is stage-specific and only emitted for known compatible models", () => {
+  const job = { title: "Senior Frontend Engineer", company: "Synthetic Co", description: "React and TypeScript", technologies: ["React"] };
+  const approvedSkills = [{ key: "react", label: "React", level: "commercial" as const, provenance: "existing_kb" as const }];
+  const resumeInput = { job, candidate: candidateProfileForAi(profile()), analysis: EMPTY_ANALYSIS, approvedSkills };
+  const config = (request: Record<string, unknown>) => request.generationConfig as Record<string, unknown>;
+
+  assert.equal(geminiThinkingLevelForStage("gemini-3.7-flash", "analysis"), "low");
+  assert.equal(geminiThinkingLevelForStage("gemini-3.7-flash", "generation"), "low");
+  assert.deepEqual(config(buildGeminiAnalysisRequest({ job }, "gemini-3.7-flash")).thinkingConfig, { thinkingLevel: "low" });
+  assert.deepEqual(config(buildGeminiResumeRequest(resumeInput, "gemini-3.7-flash")).thinkingConfig, { thinkingLevel: "low" });
+  assert.deepEqual(config(buildGeminiResumeRequest(resumeInput, "gemini-3.6-flash")).thinkingConfig, { thinkingLevel: "medium" });
+  assert.deepEqual(config(buildGeminiAnalysisRequest({ job }, "gemini-3.5-flash-lite")).thinkingConfig, { thinkingLevel: "minimal" });
+  assert.equal("thinkingConfig" in config(buildGeminiResumeRequest(resumeInput, "future-model")), false);
+  assert.match(JSON.stringify(buildGeminiResumeRequest(resumeInput, "gemini-3.7-flash")), /confident senior-level language/);
+});
+
 test("Gemini retries one infrastructure failure and uses the fallback model", async () => {
   assert.equal(isRetryableGeminiStatus(408), true);
   assert.equal(isRetryableGeminiStatus(503), true);
   assert.equal(isRetryableGeminiStatus(429), false);
   assert.equal(isRetryableGeminiStatus(400), false);
   const endpoints: string[] = [];
+  const initializedModels: string[] = [];
   const delays: number[] = [];
   const result = await fetchGeminiWithFallback(
     async (endpoint) => { endpoints.push(String(endpoint)); return new Response("{}", { status: endpoints.length === 1 ? 503 : 200 }); },
-    "primary", "fallback", (model) => `https://example.test/${model}`, () => ({ method: "POST" }),
+    "primary", "fallback", (model) => `https://example.test/${model}`, (model) => { initializedModels.push(model); return { method: "POST" }; },
     async (milliseconds: number) => { delays.push(milliseconds); },
   );
   assert.equal(result.response.status, 200);
   assert.equal(result.model, "fallback");
   assert.equal(result.attempts, 2);
   assert.deepEqual(endpoints, ["https://example.test/primary", "https://example.test/fallback"]);
+  assert.deepEqual(initializedModels, ["primary", "fallback"]);
   assert.deepEqual(delays, [300]);
 });
 
