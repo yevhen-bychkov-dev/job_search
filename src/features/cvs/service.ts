@@ -82,7 +82,7 @@ function geminiMessage(error: CvAiProviderError): string {
   if (error.code === "GEMINI_HTTP_429") return "Gemini is rate-limited or out of quota (GEMINI_HTTP_429). This request was not automatically repeated; retry after the provider limit resets.";
   if (error.code === "GEMINI_HTTP_400") return "Gemini rejected the structured-output request (GEMINI_HTTP_400). This error is not retryable; verify the deployed application version and Gemini model configuration.";
   if (/^GEMINI_HTTP_5\d\d$/.test(error.code)) return `Gemini is temporarily unavailable after one bounded retry (${error.code}). Retry this stage later.`;
-  if (error.code === "GEMINI_TIMEOUT") return "Gemini did not respond after one bounded retry (GEMINI_TIMEOUT). Retry this stage later.";
+  if (error.code === "GEMINI_TIMEOUT") return "Gemini exceeded this stage's response deadline (GEMINI_TIMEOUT). The request was not automatically repeated because its provider-side completion and token cost are unknown. Retry this stage once.";
   if (error.code === "GEMINI_NETWORK_FAILURE") return "The Gemini request failed after one bounded retry (GEMINI_NETWORK_FAILURE). Retry this stage later.";
   if (error.code === "GEMINI_TRUNCATED_RESPONSE") return "Gemini stopped before completing the structured resume. Retry content generation.";
   return `Gemini could not produce valid structured output (${error.code}).`;

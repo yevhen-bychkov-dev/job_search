@@ -38,7 +38,14 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.doesNotMatch(JSON.stringify(resumeConfig.responseJsonSchema), /minItems|maxItems/);
   assert.equal("responseSchema" in analysisConfig, false);
   assert.equal("responseSchema" in resumeConfig, false);
+  assert.deepEqual(analysisConfig.thinkingConfig, { thinkingLevel: "minimal" });
+  assert.deepEqual(resumeConfig.thinkingConfig, { thinkingLevel: "minimal" });
+  assert.equal(analysisConfig.maxOutputTokens, 2_048);
+  assert.equal(resumeConfig.maxOutputTokens, 4_096);
+  assert.equal("temperature" in analysisConfig, false);
+  assert.equal("temperature" in resumeConfig, false);
   assert.match(JSON.stringify(resumeRequest), /Approved skill snapshot/);
+  assert.doesNotMatch(JSON.stringify(resumeRequest), /mustHaveTechnical/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /alex@example\.test|Alex Example|linkedin\.com/i);
 });
 
@@ -71,6 +78,17 @@ test("Gemini never amplifies quota or permanent request failures", async () => {
     assert.equal(result.response.status, status);
     assert.equal(attempts, 1);
   }
+});
+
+test("Gemini does not duplicate an ambiguously timed-out request", async () => {
+  let attempts = 0;
+  const timeout = new Error("Synthetic timeout");
+  timeout.name = "TimeoutError";
+  await assert.rejects(fetchGeminiWithFallback(
+    async () => { attempts += 1; throw timeout; },
+    "primary", "fallback", (model) => `https://example.test/${model}`, () => ({ method: "POST" }),
+  ), timeout);
+  assert.equal(attempts, 1);
 });
 
 test("Gemini response extraction distinguishes invalid, empty, and truncated output", () => {

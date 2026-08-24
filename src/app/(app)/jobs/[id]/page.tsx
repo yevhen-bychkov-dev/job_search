@@ -14,6 +14,7 @@ import { isUuid } from "@/lib/validation";
 import { formatDateInTimeZone, formatDateTimeInTimeZone, normalizeSourceUrl } from "@/features/jobs/domain";
 
 export const metadata: Metadata = { title: "Job details" };
+export const maxDuration = 120;
 
 export default async function JobDetailPage({ params, searchParams }: PageProps<"/jobs/[id]">) {
   const identity = await requireIdentity();

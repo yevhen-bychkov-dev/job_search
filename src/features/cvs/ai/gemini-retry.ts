@@ -40,7 +40,9 @@ export async function fetchGeminiWithFallback(
       await response.body?.cancel().catch(() => undefined);
     } catch (error) {
       lastError = error;
-      if (index === models.length - 1) throw error;
+      // A client timeout is ambiguous: Gemini may still have processed and
+      // billed the request. Do not submit the same expensive prompt again.
+      if (isGeminiTimeout(error) || index === models.length - 1) throw error;
       console.info(JSON.stringify({ event: "resume.gemini.retry", ...metadata, attempt: 1, nextAttempt: 2, responseStatus: "network", retryModel: models[1] }));
     }
     await waitImplementation(RETRY_DELAY_MS);
