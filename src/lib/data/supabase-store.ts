@@ -2,7 +2,7 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
-import { nextCvVersion, parseGeneratedCvContent, parseVacancyAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
+import { nextCvVersion, parseStoredGeneratedCvContent, parseVacancyAnalysis, recoverSavedJobRequirementsFromAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
 import type { ApprovedResumeSkill, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
@@ -112,7 +112,7 @@ function toGeneratedCv(row: {
   template_version: number | null;
   created_at: string;
 }): GeneratedCv {
-  const content = parseGeneratedCvContent(row.content_json);
+  const content = parseStoredGeneratedCvContent(row.content_json);
   if (!content.ok) throw new DataConsistencyError(content.message);
   return {
     id: row.id,
@@ -607,7 +607,14 @@ export class SupabaseAppStore implements AppStore {
     if (!data) return null;
     const analysis = parseVacancyAnalysis(data.analysis_json);
     const requirements = validateSavedJobRequirements(data.requirements_json);
-    if (!analysis.ok || !requirements.ok) throw new DataConsistencyError("Stored resume skill suggestions are invalid.");
+    if (!analysis.ok) {
+      reportUnexpectedError("resume-requirements.read.invalid-analysis", new DataConsistencyError(analysis.message));
+      return null;
+    }
+    if (!requirements.ok) {
+      reportUnexpectedError("resume-requirements.read.recovered-requirements", new DataConsistencyError(requirements.message));
+      return { analysis: analysis.data, requirements: recoverSavedJobRequirementsFromAnalysis(analysis.data), approvedAt: null, updatedAt: data.updated_at };
+    }
     const approvedAt = data.approved_at ?? inferLegacyRequirementsApproval(requirements.data, data.updated_at);
     return { analysis: analysis.data, requirements: requirements.data, approvedAt, updatedAt: data.updated_at };
   }
@@ -728,7 +735,16 @@ export class SupabaseAppStore implements AppStore {
       .eq("job_id", jobId)
       .order("version", { ascending: false });
     if (error) throw new Error(`Unable to load generated CVs: ${error.message}`);
-    return data.map(toGeneratedCv);
+    const cvs: GeneratedCv[] = [];
+    for (const row of data) {
+      try {
+        cvs.push(toGeneratedCv(row));
+      } catch (error) {
+        if (!(error instanceof DataConsistencyError)) throw error;
+        reportUnexpectedError("cvs.read.skipped-invalid-row", error);
+      }
+    }
+    return cvs;
   }
 
   async createGeneratedCv(

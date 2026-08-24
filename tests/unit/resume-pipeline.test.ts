@@ -6,6 +6,7 @@ import {
   approvedSkillsFromRequirements,
   materializeResumeContent,
   materializeVacancyAnalysis,
+  recoverSavedJobRequirementsFromAnalysis,
   savedJobRequirementsFromAnalysis,
   savedJobRequirementsToAnalysis,
   validateRequirementApproval,
@@ -61,6 +62,17 @@ test("legacy saved requirements remain readable during the approved_at migration
   assert.equal(inferLegacyRequirementsApproval(draft.map((requirement) => ({ ...requirement, level: "commercial" })), updatedAt), updatedAt);
   assert.equal(inferLegacyRequirementsApproval(draft, updatedAt), null);
   assert.equal(inferLegacyRequirementsApproval([], updatedAt), null);
+});
+
+test("invalid legacy requirement edits can be rebuilt as an unapproved draft", () => {
+  const analysis = materializeVacancyAnalysis(RAW_SKILLS, JOB, profile());
+  if (!analysis.ok) assert.fail(analysis.message);
+  const duplicate = structuredClone(analysis.data.mustHaveTechnical[0]);
+  duplicate.key = "graphql-secondary";
+  analysis.data.niceToHaveTechnical.push(duplicate);
+  const recovered = recoverSavedJobRequirementsFromAnalysis(analysis.data);
+  assert.equal(recovered.filter((requirement) => requirement.label === duplicate.label).length, 1);
+  assert.equal(validateSavedJobRequirements(recovered).ok, true);
 });
 
 test("approved skills are authoritative in generated content and unsupported claims fall back to cited facts", () => {

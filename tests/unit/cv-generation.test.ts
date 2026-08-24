@@ -4,7 +4,7 @@ import test from "node:test";
 import { buildGeminiAnalysisRequest, buildGeminiResumeRequest, geminiThinkingLevelForStage } from "../../src/features/cvs/ai/gemini-request.ts";
 import { fetchGeminiWithFallback, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse, resumeContentJsonSchema, skillSuggestionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
-import { nextCvVersion, parseGeneratedCvContent } from "../../src/features/cvs/domain.ts";
+import { nextCvVersion, parseGeneratedCvContent, parseStoredGeneratedCvContent } from "../../src/features/cvs/domain.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
 import type { VacancyAnalysis } from "../../src/features/cvs/types.ts";
 
@@ -124,4 +124,21 @@ test("stored content validation and CV versioning remain deterministic", () => {
   assert.equal(parseGeneratedCvContent(content).ok, false);
   assert.equal(nextCvVersion([]), 1);
   assert.equal(nextCvVersion([1, 5, 3]), 6);
+});
+
+test("legacy stored CV content remains readable without weakening new writes", () => {
+  const legacyContent = {
+    headline: "",
+    summary: "",
+    skills: ["React"],
+    experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "", endDate: "", technologies: ["React"], achievements: [] }],
+    education: [{ institution: "Synthetic University", degree: "", startDate: "", endDate: "" }],
+  };
+  assert.equal(parseGeneratedCvContent(legacyContent).ok, false);
+  const stored = parseStoredGeneratedCvContent(legacyContent);
+  if (!stored.ok) assert.fail(stored.message);
+  assert.equal(stored.data.headline, null);
+  assert.equal(stored.data.experience[0].startDate, null);
+  assert.equal(stored.data.education[0].degree, null);
+  assert.deepEqual(stored.data.experience[0].achievements, []);
 });

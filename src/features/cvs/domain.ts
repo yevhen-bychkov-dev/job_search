@@ -181,6 +181,16 @@ export function savedJobRequirementsFromAnalysis(analysis: VacancyAnalysis): Sav
   })));
 }
 
+export function recoverSavedJobRequirementsFromAnalysis(analysis: VacancyAnalysis): SavedJobRequirement[] {
+  const labels = new Set<string>();
+  return savedJobRequirementsFromAnalysis(analysis).filter((requirement) => {
+    const label = normalized(requirement.label);
+    if (!label || labels.has(label)) return false;
+    labels.add(label);
+    return true;
+  });
+}
+
 export function savedJobRequirementsToAnalysis(saved: JobResumeRequirements): VacancyAnalysis {
   const analysis = structuredClone(saved.analysis);
   for (const section of REQUIREMENT_SECTIONS) {
@@ -425,4 +435,56 @@ export function parseGeneratedCvContent(value: unknown): ParseResult<GeneratedCv
     education.push({ institution: item.institution, degree: item.degree as string | null, startDate: item.startDate as string | null, endDate: item.endDate as string | null });
   }
   return { ok: true, data: { headline: value.headline as string | null, summary: value.summary as string | null, skills: skills.data, experience, education } };
+}
+
+function legacyStoredStringList(value: unknown, maximumItems: number): ParseResult<string[]> {
+  if (!Array.isArray(value) || value.length > maximumItems || !value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160)) {
+    return { ok: false, message: "Stored legacy CV text list is invalid." };
+  }
+  if (new Set(value).size !== value.length) return { ok: false, message: "Stored legacy CV text list contains duplicates." };
+  return { ok: true, data: value as string[] };
+}
+
+function legacyStoredNullableText(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length > 1200) return undefined;
+  return value.trim() || null;
+}
+
+/**
+ * Reads CV rows written before the stricter storage validator was introduced.
+ * New model output and writes must continue to use parseGeneratedCvContent.
+ */
+export function parseStoredGeneratedCvContent(value: unknown): ParseResult<GeneratedCvContent> {
+  const current = parseGeneratedCvContent(value);
+  if (current.ok) return current;
+  if (!isRecord(value) || !hasOnlyKeys(value, ["headline", "summary", "skills", "experience", "education"])) return current;
+
+  const headline = legacyStoredNullableText(value.headline);
+  const summary = legacyStoredNullableText(value.summary);
+  const skills = legacyStoredStringList(value.skills, 100);
+  if (headline === undefined || summary === undefined || !skills.ok || !Array.isArray(value.experience) || value.experience.length > 20 || !Array.isArray(value.education) || value.education.length > 20) return current;
+
+  const experience: GeneratedCvContent["experience"] = [];
+  for (const item of value.experience) {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["company", "role", "startDate", "endDate", "technologies", "achievements"]) || typeof item.company !== "string" || typeof item.role !== "string" || item.company.length > 1200 || item.role.length > 1200) return current;
+    const startDate = legacyStoredNullableText(item.startDate);
+    const endDate = legacyStoredNullableText(item.endDate);
+    const technologies = legacyStoredStringList(item.technologies, 50);
+    const achievements = legacyStoredStringList(item.achievements, 30);
+    if (startDate === undefined || endDate === undefined || !technologies.ok || !achievements.ok) return current;
+    experience.push({ company: item.company.trim(), role: item.role.trim(), startDate, endDate, technologies: technologies.data, achievements: achievements.data });
+  }
+
+  const education: GeneratedCvContent["education"] = [];
+  for (const item of value.education) {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["institution", "degree", "startDate", "endDate"]) || typeof item.institution !== "string" || item.institution.length > 1200) return current;
+    const degree = legacyStoredNullableText(item.degree);
+    const startDate = legacyStoredNullableText(item.startDate);
+    const endDate = legacyStoredNullableText(item.endDate);
+    if (degree === undefined || startDate === undefined || endDate === undefined) return current;
+    education.push({ institution: item.institution.trim(), degree, startDate, endDate });
+  }
+
+  return { ok: true, data: { headline, summary, skills: skills.data, experience, education } };
 }
