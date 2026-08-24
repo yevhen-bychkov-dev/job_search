@@ -38,8 +38,8 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.doesNotMatch(JSON.stringify(resumeConfig.responseJsonSchema), /minItems|maxItems/);
   assert.equal("responseSchema" in analysisConfig, false);
   assert.equal("responseSchema" in resumeConfig, false);
-  assert.deepEqual(analysisConfig.thinkingConfig, { thinkingLevel: "minimal" });
-  assert.deepEqual(resumeConfig.thinkingConfig, { thinkingLevel: "minimal" });
+  assert.equal("thinkingConfig" in analysisConfig, false);
+  assert.equal("thinkingConfig" in resumeConfig, false);
   assert.equal(analysisConfig.maxOutputTokens, 2_048);
   assert.equal(resumeConfig.maxOutputTokens, 4_096);
   assert.equal("temperature" in analysisConfig, false);

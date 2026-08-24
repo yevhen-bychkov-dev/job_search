@@ -26,7 +26,6 @@ export function buildGeminiAnalysisRequest(input: AnalyzeVacancyInput): Record<s
       responseMimeType: "application/json",
       responseJsonSchema: skillSuggestionJsonSchema(),
       maxOutputTokens: 2_048,
-      thinkingConfig: { thinkingLevel: "minimal" },
     },
   };
 }
@@ -53,7 +52,6 @@ export function buildGeminiResumeRequest(input: GenerateCvInput): Record<string,
       responseMimeType: "application/json",
       responseJsonSchema: resumeContentJsonSchema(),
       maxOutputTokens: 4_096,
-      thinkingConfig: { thinkingLevel: "minimal" },
     },
   };
 }
