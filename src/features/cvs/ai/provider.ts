@@ -81,7 +81,11 @@ export function resumeContentJsonSchema(): Record<string, unknown> {
     properties: {
       headline: { type: "string", description: "A truthful vacancy-specific professional headline." },
       summary: { type: "string", description: "A concise tailored summary grounded only in the verified profile." },
-      skills: { type: "array", items: { type: "string" } },
+      skills: {
+        type: "array",
+        description: "A vacancy-prioritized blend of approved skills and complementary verified candidate skills; never only vacancy keywords.",
+        items: { type: "string" },
+      },
       experience: {
         type: "array",
         items: {

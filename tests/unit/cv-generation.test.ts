@@ -45,6 +45,9 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.equal("temperature" in analysisConfig, false);
   assert.equal("temperature" in resumeConfig, false);
   assert.match(JSON.stringify(resumeRequest), /Approved skill snapshot/);
+  assert.match(JSON.stringify(resumeRequest), /not as the complete skills list/);
+  assert.match(JSON.stringify(resumeRequest), /complementary selection from the verified candidate skills/);
+  assert.match(JSON.stringify(resumeConfig.responseJsonSchema), /never only vacancy keywords/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /mustHaveTechnical/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /alex@example\.test|Alex Example|linkedin\.com/i);
 });

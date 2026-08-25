@@ -90,7 +90,10 @@ function skillsHtml(skills: string[]): string {
 
 function skillGroupsHtml(skills: string[]): string {
   if (skills.length === 0) return "";
-  return `<div class="skill-group"><h3 class="skill-title">Relevant skills</h3><div>${skills.map(escapeHtml).join(" · ")}</div></div>`;
+  // ResumeContent intentionally stores one truthful, flat skills list. Let that
+  // single generated group fill multi-column template grids, and do not let a
+  // template's `break-after: avoid` chain it to the following section.
+  return `<div class="skill-group resume-skill-group" style="grid-column: 1 / -1; break-after: auto; page-break-after: auto;"><h3 class="skill-title">Relevant skills</h3><div>${skills.map(escapeHtml).join(" · ")}</div></div>`;
 }
 
 function experienceHtml(content: GeneratedCvContent): string {

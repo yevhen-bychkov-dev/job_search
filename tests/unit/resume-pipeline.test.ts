@@ -109,5 +109,7 @@ test("template validation blocks executable content and supports supplied-templa
   assert.match(html, /Product Engineer/);
   assert.match(html, /Built &lt;safe&gt; components\./);
   assert.match(html, /Relevant skills/);
+  assert.match(html, /class="skill-group resume-skill-group"/);
+  assert.match(html, /grid-column: 1 \/ -1; break-after: auto; page-break-after: auto;/);
   assert.doesNotMatch(html, /\{\{resume|SELECTED_IMPACT_ITEMS|_BULLETS|SKILL_GROUPS/);
 });
