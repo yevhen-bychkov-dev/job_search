@@ -11,6 +11,10 @@ export function geminiThinkingLevelForStage(model: string, stage: GeminiResumeSt
   return undefined;
 }
 
+export function isHighQualityCvModel(model: string): boolean {
+  return model === "gemini-3.6-flash";
+}
+
 function generationConfig(schema: Record<string, unknown>, maxOutputTokens: number, model: string | undefined, stage: GeminiResumeStage): Record<string, unknown> {
   const thinkingLevel = model ? geminiThinkingLevelForStage(model, stage) : undefined;
   return {

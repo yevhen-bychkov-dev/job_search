@@ -74,7 +74,7 @@ The application validates the structured content against the original profile, i
 
 This means the model does not control contact details, arbitrary work history, HTML, CSS, or the final PDF layout. A job’s saved requirements are reusable input for every later CV version for that job.
 
-Each completed resume is stored as an immutable version associated with the job and exact template version. Structured-content generation and PDF rendering are separate leased stages, so an interrupted or failed render can be retried without another Gemini call. One database invariant permits only one active generation per user/job. Each Gemini call makes one primary attempt and at most one infrastructure retry/fallback; 429 responses are never amplified. Incomplete and failed attempts remain lifecycle records and never appear in normal resume history.
+Each completed resume is stored as an immutable version associated with the job and exact template version. One click waits for Gemini's actual response, validates it, renders the HTML template to PDF, stores it privately, and reports success only after the PDF exists. Final writing uses full Gemini 3.6 Flash with medium thinking; Flash-Lite remains available only for vacancy analysis. The job route has a 300-second function budget for Gemini plus Chromium rendering. Gemini gets at most one retry/fallback and only after an explicit HTTP 408/5xx response; the app adds no fetch timeout or synthetic retry delay.
 
 ## Job discovery
 
@@ -141,7 +141,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Configure the required Supabase environment values and Gemini API key in `.env.local`. `GEMINI_FALLBACK_MODEL` is optional and is used only for the single bounded retry after an infrastructure failure; quota/rate-limit responses are not retried automatically.
+Configure the required Supabase environment values and Gemini API key in `.env.local`. `GEMINI_FALLBACK_MODEL` is optional and is used only for the single retry after Gemini returns HTTP 408/5xx; quota/rate-limit, permanent HTTP, and local network failures are not retried automatically.
 
 To test the application locally without Supabase, Docker, external credentials, or real data, run:
 

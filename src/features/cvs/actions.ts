@@ -68,27 +68,15 @@ export async function generateCvAction(jobId: string, _previous: CvActionState, 
   if (typeof idempotencyKey !== "string" || !isUuid(idempotencyKey)) return { status: "error", message: "The generation request is invalid. Refresh and try again." };
   try {
     const result = await beginResumeGeneration(identity.userId, jobId, idempotencyKey);
-    if (result.kind === "in_progress") return { status: "in_progress", message: "Another request owns this generation stage. Wait a moment, then retry.", generationId: result.generation.id, stage: result.generation.currentStage ?? "generation" };
-    if (result.kind === "ready_to_render") return { status: "ready_to_render", message: "Structured resume content is ready. Rendering the PDF…", generationId: result.generation.id, stage: "render" };
+    if (result.kind === "in_progress") return { status: "in_progress", message: "Another request owns this CV. Wait a moment, then try again.", generationId: result.generation.id, stage: result.generation.currentStage ?? "generation" };
+    const rendered = result.kind === "ready_to_render"
+      ? await renderResumeGeneration(identity.userId, jobId, result.generation.id)
+      : result;
+    if (rendered.kind === "in_progress") return { status: "in_progress", message: "Another request owns this CV. Wait a moment, then try again.", generationId: rendered.generation.id, stage: rendered.generation.currentStage ?? "render" };
     revalidatePath(`/jobs/${jobId}`);
-    return { status: "success", message: `Resume #${result.cv.version} generated.`, generationId: result.generation.id, stage: "render" };
+    return { status: "success", message: `Resume #${rendered.cv.version} generated.`, generationId: rendered.generation.id, stage: "render" };
   } catch (error) {
+    revalidatePath(`/jobs/${jobId}`);
     return failure("cvs.generate", error);
-  }
-}
-
-export async function renderCvAction(jobId: string, _previous: CvActionState, formData: FormData): Promise<CvActionState> {
-  const identity = await requireIdentity();
-  if (!isUuid(jobId)) return { status: "error", message: "Invalid job identifier.", stage: "render" };
-  const generationId = formData.get("generationId");
-  if (typeof generationId !== "string" || !isUuid(generationId)) return { status: "error", message: "The render request is invalid. Refresh and try again.", stage: "render" };
-  try {
-    const result = await renderResumeGeneration(identity.userId, jobId, generationId);
-    if (result.kind === "in_progress") return { status: "in_progress", message: "Another request is rendering this PDF. Wait a moment, then retry.", generationId, stage: "render" };
-    revalidatePath(`/jobs/${jobId}`);
-    return { status: "success", message: `Resume #${result.cv.version} generated.`, generationId, stage: "render" };
-  } catch (error) {
-    const state = failure("cvs.render", error);
-    return { ...state, generationId, stage: "render" };
   }
 }

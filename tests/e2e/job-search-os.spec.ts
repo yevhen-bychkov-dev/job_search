@@ -342,28 +342,20 @@ test("generate immutable CV versions from approved skills and prevent duplicate 
   await page.getByRole("button", { name: "Approve skills", exact: true }).click();
   await expect(page.getByText("Skills approved for resume generation.")).toBeVisible();
 
-  let actionRequests = 0;
+  let generationActionRequests = 0;
   await page.route("**/*", async (route) => {
-    if (route.request().method() === "POST" && route.request().headers()["next-action"]) {
-      actionRequests += 1;
-      if (actionRequests === 2) {
-        await route.abort("failed");
-        return;
-      }
-    }
+    if (route.request().method() === "POST" && route.request().headers()["next-action"]) generationActionRequests += 1;
     await route.continue();
   });
   await page.getByRole("button", { name: "Generate tailored resume", exact: true }).click();
-  await expect(page.getByText(/PDF rendering was interrupted/)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("heading", { name: "Something went wrong" })).toHaveCount(0);
-  await page.unroute("**/*");
-
-  await page.getByRole("button", { name: "Generate tailored resume", exact: true }).click();
   await expect(page.getByText("Resume #1 generated.")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".cv-list strong")).toHaveText(["CV #1"]);
+  expect(generationActionRequests).toBe(1);
   await page.getByRole("button", { name: "Generate tailored resume", exact: true }).dblclick();
   await expect(page.getByText("Resume #2 generated.")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".cv-list strong")).toHaveText(["CV #2", "CV #1"]);
+  expect(generationActionRequests).toBe(2);
+  await page.unroute("**/*");
   await expect(page.getByRole("link", { name: "Preview" })).toHaveCount(2);
   await expect(page.getByRole("link", { name: "Download" })).toHaveCount(2);
 

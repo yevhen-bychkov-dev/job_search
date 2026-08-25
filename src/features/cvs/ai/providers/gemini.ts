@@ -3,10 +3,7 @@ import "server-only";
 import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput, ResumeAiContext } from "../provider.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse } from "../provider.ts";
 import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
-import { fetchGeminiWithFallback, isGeminiTimeout } from "../gemini-retry.ts";
-
-const ANALYSIS_TIMEOUT_MS = 45_000;
-const GENERATION_TIMEOUT_MS = 100_000;
+import { fetchGeminiWithFallback } from "../gemini-retry.ts";
 
 function tokenUsage(payload: unknown): Record<string, number | null> {
   if (typeof payload !== "object" || payload === null || !("usageMetadata" in payload)) return {};
@@ -19,6 +16,26 @@ function tokenUsage(payload: unknown): Record<string, number | null> {
     thoughtTokens: count("thoughtsTokenCount"),
     totalTokens: count("totalTokenCount"),
   };
+}
+
+async function throwGeminiHttpError(response: Response): Promise<never> {
+  let providerStatus: string | undefined;
+  let providerMessage: string | undefined;
+  try {
+    const payload: unknown = await response.clone().json();
+    if (typeof payload === "object" && payload !== null && "error" in payload) {
+      const error = payload.error;
+      if (typeof error === "object" && error !== null) {
+        if ("status" in error && typeof error.status === "string") providerStatus = error.status;
+        if ("message" in error && typeof error.message === "string") providerMessage = error.message;
+      }
+    }
+  } catch {
+    // The HTTP status remains the reliable error signal for non-JSON bodies.
+  }
+  throw new CvAiProviderError(`GEMINI_HTTP_${response.status}`, `Gemini request failed with HTTP ${response.status}.`, {
+    cause: { providerStatus, providerMessage, retryAfter: response.headers.get("retry-after") ?? undefined },
+  });
 }
 
 export class GeminiCvProvider implements CvAiProvider {
@@ -49,11 +66,10 @@ export class GeminiCvProvider implements CvAiProvider {
     return this.selectedModel;
   }
 
-  private async request(primaryModel: string, bodyForModel: (model: string) => Record<string, unknown>, timeoutMs: number, context?: ResumeAiContext): Promise<unknown> {
+  private async request(primaryModel: string, bodyForModel: (model: string) => Record<string, unknown>, context?: ResumeAiContext): Promise<unknown> {
     const startedAt = Date.now();
-    const deadline = startedAt + timeoutMs;
     const primaryBody = JSON.stringify(bodyForModel(primaryModel));
-    const metadata = { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown", model: primaryModel, requestBytes: new TextEncoder().encode(primaryBody).byteLength, timeoutMs };
+    const metadata = { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown", model: primaryModel, requestBytes: new TextEncoder().encode(primaryBody).byteLength };
     let response: Response;
     let attempts = 1;
     try {
@@ -69,9 +85,7 @@ export class GeminiCvProvider implements CvAiProvider {
             "x-goog-api-key": this.apiKey,
           },
           body: JSON.stringify(bodyForModel(model)),
-          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
         }),
-        undefined,
         { generationId: context?.generationId ?? null, jobId: context?.jobId ?? null, stage: context?.stage ?? "unknown" },
       );
       response = result.response;
@@ -80,39 +94,19 @@ export class GeminiCvProvider implements CvAiProvider {
       if (!response.ok) console.info(JSON.stringify({ event: "resume.gemini", ...metadata, model: result.model, attempts: result.attempts, durationMs: Date.now() - startedAt, responseStatus: Math.floor(response.status / 100) * 100, success: false }));
     } catch (error) {
       console.warn(JSON.stringify({ event: "resume.gemini", ...metadata, durationMs: Date.now() - startedAt, success: false, errorCategory: error instanceof CvAiProviderError ? error.code : "network" }));
-      if (isGeminiTimeout(error)) throw new CvAiProviderError("GEMINI_TIMEOUT", `Gemini did not respond within ${Math.round(timeoutMs / 1_000)} seconds.`, { cause: error });
       throw new CvAiProviderError("GEMINI_NETWORK_FAILURE", "Gemini request did not complete.", { cause: error });
     }
-    if (!response.ok) {
-      let providerStatus: string | undefined;
-      let providerMessage: string | undefined;
-      try {
-        const payload: unknown = await response.clone().json();
-        if (typeof payload === "object" && payload !== null && "error" in payload) {
-          const error = payload.error;
-          if (typeof error === "object" && error !== null) {
-            if ("status" in error && typeof error.status === "string") providerStatus = error.status;
-            if ("message" in error && typeof error.message === "string") providerMessage = error.message;
-          }
-        }
-      } catch {
-        // The HTTP status remains the reliable error signal when the provider
-        // returns a non-JSON error body.
-      }
-      throw new CvAiProviderError(`GEMINI_HTTP_${response.status}`, `Gemini request failed with HTTP ${response.status}.`, {
-        cause: { providerStatus, providerMessage, retryAfter: response.headers.get("retry-after") ?? undefined },
-      });
-    }
+    if (!response.ok) await throwGeminiHttpError(response);
     const payload = await response.json() as unknown;
     console.info(JSON.stringify({ event: "resume.gemini", ...metadata, model: this.selectedModel, attempts, durationMs: Date.now() - startedAt, responseStatus: 200, success: true, ...tokenUsage(payload) }));
     return extractGeminiStructuredResponse(payload);
   }
 
   async analyzeVacancy(input: AnalyzeVacancyInput, context?: ResumeAiContext): Promise<unknown> {
-    return this.request(this.analysisModel, (model) => buildGeminiAnalysisRequest(input, model), ANALYSIS_TIMEOUT_MS, context);
+    return this.request(this.analysisModel, (model) => buildGeminiAnalysisRequest(input, model), context);
   }
 
   async generateCv(input: GenerateCvInput, context?: ResumeAiContext): Promise<unknown> {
-    return this.request(this.primaryModel, (model) => buildGeminiResumeRequest(input, model), GENERATION_TIMEOUT_MS, context);
+    return this.request(this.primaryModel, (model) => buildGeminiResumeRequest(input, model), context);
   }
 }

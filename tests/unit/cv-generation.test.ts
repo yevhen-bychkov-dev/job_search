@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildGeminiAnalysisRequest, buildGeminiResumeRequest, geminiThinkingLevelForStage } from "../../src/features/cvs/ai/gemini-request.ts";
+import { buildGeminiAnalysisRequest, buildGeminiResumeRequest, geminiThinkingLevelForStage, isHighQualityCvModel } from "../../src/features/cvs/ai/gemini-request.ts";
 import { fetchGeminiWithFallback, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse, resumeContentJsonSchema, skillSuggestionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
 import { nextCvVersion, parseGeneratedCvContent, parseStoredGeneratedCvContent } from "../../src/features/cvs/domain.ts";
@@ -65,25 +65,29 @@ test("Gemini thinking is stage-specific and only emitted for known compatible mo
   assert.match(JSON.stringify(buildGeminiResumeRequest(resumeInput, "gemini-3.7-flash")), /confident senior-level language/);
 });
 
-test("Gemini retries one infrastructure failure and uses the fallback model", async () => {
+test("final CV writing requires a full Gemini Flash model", () => {
+  assert.equal(isHighQualityCvModel("gemini-3.7-flash"), false);
+  assert.equal(isHighQualityCvModel("gemini-3.6-flash"), true);
+  assert.equal(isHighQualityCvModel("gemini-3.5-flash-lite"), false);
+  assert.equal(isHighQualityCvModel("future-model"), false);
+});
+
+test("Gemini retries one retryable HTTP response and uses the fallback model", async () => {
   assert.equal(isRetryableGeminiStatus(408), true);
   assert.equal(isRetryableGeminiStatus(503), true);
   assert.equal(isRetryableGeminiStatus(429), false);
   assert.equal(isRetryableGeminiStatus(400), false);
   const endpoints: string[] = [];
   const initializedModels: string[] = [];
-  const delays: number[] = [];
   const result = await fetchGeminiWithFallback(
     async (endpoint) => { endpoints.push(String(endpoint)); return new Response("{}", { status: endpoints.length === 1 ? 503 : 200 }); },
     "primary", "fallback", (model) => `https://example.test/${model}`, (model) => { initializedModels.push(model); return { method: "POST" }; },
-    async (milliseconds: number) => { delays.push(milliseconds); },
   );
   assert.equal(result.response.status, 200);
   assert.equal(result.model, "fallback");
   assert.equal(result.attempts, 2);
   assert.deepEqual(endpoints, ["https://example.test/primary", "https://example.test/fallback"]);
   assert.deepEqual(initializedModels, ["primary", "fallback"]);
-  assert.deepEqual(delays, [300]);
 });
 
 test("Gemini never amplifies quota or permanent request failures", async () => {
@@ -98,7 +102,7 @@ test("Gemini never amplifies quota or permanent request failures", async () => {
   }
 });
 
-test("Gemini does not duplicate an ambiguously timed-out request", async () => {
+test("Gemini does not retry a local network failure without a provider response", async () => {
   let attempts = 0;
   const timeout = new Error("Synthetic timeout");
   timeout.name = "TimeoutError";

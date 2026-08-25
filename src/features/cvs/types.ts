@@ -137,7 +137,7 @@ export type ResumeGeneration = {
 };
 
 export type CvActionState = {
-  status: "idle" | "in_progress" | "ready_to_render" | "success" | "error";
+  status: "idle" | "in_progress" | "success" | "error";
   message: string;
   generationId?: string;
   stage?: ResumeAiStage;

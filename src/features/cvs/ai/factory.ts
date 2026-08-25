@@ -4,6 +4,7 @@ import { isPlaywrightTestMode } from "@/lib/supabase/environment";
 
 import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput } from "./provider";
 import { CvAiProviderError, deterministicAnalysis, deterministicResume } from "./provider";
+import { isHighQualityCvModel } from "./gemini-request";
 import { GeminiCvProvider } from "./providers/gemini";
 
 class SyntheticCvProvider implements CvAiProvider {
@@ -11,12 +12,10 @@ class SyntheticCvProvider implements CvAiProvider {
   readonly model = "deterministic-e2e";
 
   async analyzeVacancy(input: AnalyzeVacancyInput): Promise<unknown> {
-    await new Promise((resolve) => setTimeout(resolve, 50));
     return deterministicAnalysis(input);
   }
 
   async generateCv(input: GenerateCvInput): Promise<unknown> {
-    await new Promise((resolve) => setTimeout(resolve, 150));
     return deterministicResume(input);
   }
 }
@@ -35,6 +34,7 @@ function validModel(name: string, value: string): string {
 export function createCvAiProvider(): CvAiProvider {
   if (isPlaywrightTestMode()) return new SyntheticCvProvider();
   const model = validModel("GEMINI_MODEL", requiredEnvironment("GEMINI_MODEL"));
+  if (!isHighQualityCvModel(model)) throw new CvAiProviderError("GEMINI_CV_MODEL_TOO_WEAK", "GEMINI_MODEL must use a supported full Gemini Flash model for final CV writing; keep Flash-Lite only in GEMINI_ANALYSIS_MODEL.");
   const configuredFallback = process.env.GEMINI_FALLBACK_MODEL?.trim();
   const validConfiguredFallback = configuredFallback && configuredFallback !== "PASTE_HERE" && /^[A-Za-z0-9._-]{1,100}$/.test(configuredFallback)
     ? configuredFallback
@@ -44,13 +44,13 @@ export function createCvAiProvider(): CvAiProvider {
   }
   const fallbackModel = validConfiguredFallback
     ? validModel("GEMINI_FALLBACK_MODEL", validConfiguredFallback)
-    : model === "gemini-3.7-flash"
+    : model === "gemini-3.6-flash"
       ? "gemini-3.6-flash"
       : null;
   const configuredAnalysis = process.env.GEMINI_ANALYSIS_MODEL?.trim();
   const analysisModel = configuredAnalysis && configuredAnalysis !== "PASTE_HERE"
     ? validModel("GEMINI_ANALYSIS_MODEL", configuredAnalysis)
-    : model === "gemini-3.7-flash"
+    : model === "gemini-3.6-flash"
       ? "gemini-3.5-flash-lite"
       : model;
   return new GeminiCvProvider(model, requiredEnvironment("GEMINI_API_KEY"), fallbackModel, analysisModel);

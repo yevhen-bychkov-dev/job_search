@@ -14,7 +14,9 @@ import { isUuid } from "@/lib/validation";
 import { formatDateInTimeZone, formatDateTimeInTimeZone, normalizeSourceUrl } from "@/features/jobs/domain";
 
 export const metadata: Metadata = { title: "Job details" };
-export const maxDuration = 120;
+// Gemini final writing and Chromium rendering share one request. Current
+// Vercel Fluid Compute supports this 300-second budget on every plan.
+export const maxDuration = 300;
 
 export default async function JobDetailPage({ params, searchParams }: PageProps<"/jobs/[id]">) {
   const identity = await requireIdentity();
