@@ -96,7 +96,7 @@ test("approved skills are authoritative in generated content and unsupported cla
 
 test("template validation blocks executable content and supports supplied-template legacy markers", () => {
   assert.match(validateResumeTemplateText("<html><body><script>bad()</script>{{resume.name}}{{resume.experience}}</body></html>"), /scripts/);
-  const template = `<!doctype html><html><body>
+  const template = `<!doctype html><html><head><style>.resume { padding: 10mm; }</style></head><body class="resume">
     <h1>{{resume.name}}</h1><h2>{{resume.title}}</h2><p>{{resume.professional_summary}}</p>
     <a>{{resume.linkedin}}</a><ul><!-- SELECTED_IMPACT_ITEMS --></ul>
     <section><ul><!-- SYNTHETIC_LABS_BULLETS --></ul></section>
@@ -104,12 +104,25 @@ test("template validation blocks executable content and supports supplied-templa
   </body></html>`;
   assert.equal(validateResumeTemplateText(template), "");
   const candidate = profile();
-  const html = renderResumeTemplate(template, { personal: { ...candidate.personal, name: "<Synthetic>" }, content: { headline: "Product Engineer", summary: "Verified summary.", skills: ["React"], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["Built <safe> components."] }], education: [] } });
+  const html = renderResumeTemplate(template, { personal: { ...candidate.personal, name: "<Synthetic>" }, content: { headline: "Product Engineer", summary: "Verified summary.", skills: ["React", "Familiar: GraphQL", "Jest", "Node.js", "Synthetic Platform"], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["Built <safe> components."] }], education: [] } });
   assert.match(html, /&lt;Synthetic&gt;/);
   assert.match(html, /Product Engineer/);
   assert.match(html, /Built &lt;safe&gt; components\./);
-  assert.match(html, /Relevant skills/);
+  assert.match(html, /Frontend/);
+  assert.match(html, /State, data and integrations/);
+  assert.match(html, /Testing and quality/);
+  assert.match(html, /Backend foundation/);
+  assert.match(html, /Additional relevant skills/);
+  assert.match(html, /<li>Familiar: GraphQL<\/li>/);
+  assert.match(html, /class="resume-skill-columns"/);
   assert.match(html, /class="skill-group resume-skill-group"/);
-  assert.match(html, /grid-column: 1 \/ -1; break-after: auto; page-break-after: auto;/);
+  assert.match(html, /column-count: 2;/);
+  assert.match(html, /column-fill: balance; break-inside: avoid; page-break-inside: avoid;/);
+  assert.equal(html.match(/<li>React<\/li>/g)?.length, 1);
+  assert.equal(html.match(/<li>Synthetic Platform<\/li>/g)?.length, 1);
+  assert.match(html, /data-resume-print-pagination/);
+  assert.match(html, /-webkit-box-decoration-break:clone;box-decoration-break:clone/);
+  assert.match(html, /data-resume-print-pagination[\s\S]*<\/head><body class="resume">/);
+  assert.doesNotMatch(html, /Relevant skills/);
   assert.doesNotMatch(html, /\{\{resume|SELECTED_IMPACT_ITEMS|_BULLETS|SKILL_GROUPS/);
 });

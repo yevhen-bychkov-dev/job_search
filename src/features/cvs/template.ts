@@ -4,6 +4,7 @@ import type { GeneratedCvContent } from "./types";
 
 export const MAX_RESUME_TEMPLATE_BYTES = 256 * 1024;
 export const RESUME_TEMPLATE_MIME_TYPE = "text/html";
+const RESUME_PRINT_PAGINATION_STYLE = `<style data-resume-print-pagination>@media print{.resume{-webkit-box-decoration-break:clone;box-decoration-break:clone;}}</style>`;
 const SUPPORTED_TOKENS = new Set([
   "resume.name", "resume.title", "resume.location", "resume.email", "resume.phone", "resume.links",
   "resume.linkedin", "resume.github", "resume.headline", "resume.summary", "resume.professional_summary",
@@ -88,12 +89,93 @@ function skillsHtml(skills: string[]): string {
   return `<ul class="resume-skills">${skills.map((skill) => `<li>${escapeHtml(skill)}</li>`).join("")}</ul>`;
 }
 
+const RESUME_SKILL_CATEGORIES = [
+  {
+    title: "Frontend",
+    skills: [
+      "react", "next.js", "typescript", "javascript", "html", "css", "sass", "css in js", "coffeescript",
+      "material ui", "ant design", "storybook", "react virtuoso", "browser apis", "accessibility",
+      "internationalization", "localization", "responsive design", "web performance", "microfrontends",
+      "react hooks", "react hook form", "formik",
+    ],
+  },
+  {
+    title: "State, data and integrations",
+    skills: [
+      "redux", "tanstack query", "react context", "axios", "rest apis", "websockets", "graphql", "auth0", "okta",
+      "feature flags", "a b testing", "api contracts",
+    ],
+  },
+  {
+    title: "Testing and quality",
+    skills: ["jest", "react testing library", "playwright", "sonarqube", "snyk", "dependabot"],
+  },
+  {
+    title: "AI product integrations",
+    skills: ["vercel ai sdk", "sse", "tool calling", "ai streaming"],
+  },
+  {
+    title: "AI-assisted engineering",
+    skills: ["cursor", "codex", "github copilot", "claude code"],
+  },
+  {
+    title: "Build and tooling",
+    skills: ["webpack", "vite", "lerna", "yarn", "git", "github actions"],
+  },
+  {
+    title: "Observability and delivery",
+    skills: ["grafana", "production debugging", "incident management", "release management", "linux"],
+  },
+  {
+    title: "Backend foundation",
+    skills: [
+      "node.js", "express", "moleculer.js", "microservices", "mysql", "sequelize", "mongodb", "aws s3", "grpc", "buf",
+      "google apps script", "google sheets", "telegram bot api", "heroku",
+    ],
+  },
+  {
+    title: "Engineering practice",
+    skills: ["code review", "technical design", "adrs", "agile"],
+  },
+] as const;
+
+const RESUME_SKILL_CATEGORY_BY_KEY: ReadonlyMap<string, string> = new Map<string, string>(
+  RESUME_SKILL_CATEGORIES.flatMap((category) => category.skills.map((skill) => [skill, category.title] as const)),
+);
+
+function resumeSkillKey(skill: string): string {
+  return skill
+    .normalize("NFKC")
+    .toLocaleLowerCase("en")
+    .replace(/^familiar:\s*/, "")
+    .replace(/[^\p{L}\p{N}+#.]+/gu, " ")
+    .trim();
+}
+
+function resumeSkillGroupHtml(title: string, skills: string[]): string {
+  return `<div class="skill-group resume-skill-group" style="break-inside: avoid; page-break-inside: avoid; break-after: auto; page-break-after: auto; margin: 0 0 4mm;"><h3 class="skill-title">${escapeHtml(title)}</h3><ul class="bullets resume-skill-list" style="margin: 0; padding-left: 4.4mm;">${skills.map((skill) => `<li>${escapeHtml(skill)}</li>`).join("")}</ul></div>`;
+}
+
 function skillGroupsHtml(skills: string[]): string {
   if (skills.length === 0) return "";
-  // ResumeContent intentionally stores one truthful, flat skills list. Let that
-  // single generated group fill multi-column template grids, and do not let a
-  // template's `break-after: avoid` chain it to the following section.
-  return `<div class="skill-group resume-skill-group" style="grid-column: 1 / -1; break-after: auto; page-break-after: auto;"><h3 class="skill-title">Relevant skills</h3><div>${skills.map(escapeHtml).join(" · ")}</div></div>`;
+  const grouped = new Map<string, string[]>();
+  for (const skill of skills) {
+    const title = RESUME_SKILL_CATEGORY_BY_KEY.get(resumeSkillKey(skill)) ?? "Additional relevant skills";
+    const categorySkills = grouped.get(title) ?? [];
+    categorySkills.push(skill);
+    grouped.set(title, categorySkills);
+  }
+  const orderedGroups = [
+    ...RESUME_SKILL_CATEGORIES.flatMap((category) => {
+      const categorySkills = grouped.get(category.title);
+      return categorySkills ? [{ title: category.title, skills: categorySkills }] : [];
+    }),
+    ...(grouped.has("Additional relevant skills")
+      ? [{ title: "Additional relevant skills", skills: grouped.get("Additional relevant skills") ?? [] }]
+      : []),
+  ];
+  const columnCount = orderedGroups.length > 1 ? 2 : 1;
+  return `<div class="resume-skill-columns" style="grid-column: 1 / -1; column-count: ${columnCount}; column-gap: 12mm; column-fill: balance; break-inside: avoid; page-break-inside: avoid; break-after: auto; page-break-after: auto;">${orderedGroups.map((group) => resumeSkillGroupHtml(group.title, group.skills)).join("")}</div>`;
 }
 
 function experienceHtml(content: GeneratedCvContent): string {
@@ -134,6 +216,13 @@ function legacyExperienceMarkers(html: string, content: GeneratedCvContent): str
   });
 }
 
+function withPrintPaginationSafeguard(html: string): string {
+  if (/<\/head\s*>/i.test(html)) {
+    return html.replace(/<\/head\s*>/i, `${RESUME_PRINT_PAGINATION_STYLE}</head>`);
+  }
+  return `${RESUME_PRINT_PAGINATION_STYLE}${html}`;
+}
+
 export type ResumeTemplateRenderInput = {
   personal: CandidateProfile["personal"];
   content: GeneratedCvContent;
@@ -167,7 +256,7 @@ export function renderResumeTemplate(templateHtml: string, input: ResumeTemplate
   rendered = rendered.replace(/<!--\s*SKILL_GROUPS\s*-->/g, skillGroupsHtml(input.content.skills));
   rendered = legacyExperienceMarkers(rendered, input.content);
   if (/\{\{[^}]+\}\}/.test(rendered) || /<!--\s*(?:SELECTED_IMPACT_ITEMS|SKILL_GROUPS|[A-Z][A-Z0-9_]*_BULLETS)\s*-->/.test(rendered)) throw new Error("The HTML template contains an unresolved resume placeholder.");
-  return rendered;
+  return withPrintPaginationSafeguard(rendered);
 }
 
 export function isResumeTemplateMetadata(value: unknown): value is { originalName: string; mimeType: string } {
