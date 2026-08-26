@@ -47,6 +47,9 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.match(JSON.stringify(resumeRequest), /Approved skill snapshot/);
   assert.match(JSON.stringify(resumeRequest), /not as the complete skills list/);
   assert.match(JSON.stringify(resumeRequest), /complementary selection from the verified candidate skills/);
+  assert.match(JSON.stringify(resumeRequest), /never reuse the same source achievement, metric, project, outcome, or responsibility/);
+  assert.match(JSON.stringify(resumeRequest), /2–4 leading bullets can be promoted to Selected Impact and removed from Professional Experience/);
+  assert.match(JSON.stringify(resumeRequest), /Reasonable approximate quantitative framing is allowed only when strongly implied/);
   assert.match(JSON.stringify(resumeConfig.responseJsonSchema), /never only vacancy keywords/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /mustHaveTechnical/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /alex@example\.test|Alex Example|linkedin\.com/i);

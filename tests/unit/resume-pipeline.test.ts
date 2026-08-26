@@ -88,10 +88,12 @@ test("approved skills are authoritative in generated content and unsupported cla
   raw.skills = ["React", "AWS", "Invented Platform"];
   const experiences = raw.experience as Array<{ experienceId: string; bullets: Array<{ text: string; sourceAchievementIds: string[] }> }>;
   experiences[0].bullets[0].text = "Managed 8 engineers and increased revenue by 20%.";
+  experiences[0].bullets.push({ text: "Paraphrased duplicate of the same achievement.", sourceAchievementIds: [...experiences[0].bullets[0].sourceAchievementIds] });
   const materialized = materializeResumeContent(candidate, raw, approvedSkills);
   if (!materialized.ok) assert.fail(materialized.message);
   assert.deepEqual(materialized.data.skills, ["React", "Familiar: GraphQL"]);
   assert.equal(materialized.data.experience[0].achievements[0], "Built accessible shared components used across internal applications.");
+  assert.equal(materialized.data.experience[0].achievements.length, 1);
 });
 
 test("template validation blocks executable content and supports supplied-template legacy markers", () => {
@@ -125,4 +127,43 @@ test("template validation blocks executable content and supports supplied-templa
   assert.match(html, /data-resume-print-pagination[\s\S]*<\/head><body class="resume">/);
   assert.doesNotMatch(html, /Relevant skills/);
   assert.doesNotMatch(html, /\{\{resume|SELECTED_IMPACT_ITEMS|_BULLETS|SKILL_GROUPS/);
+});
+
+test("Selected Impact reserves two to four achievements without repeating them in experience", () => {
+  const template = `<!doctype html><html><body><h1>{{resume.name}}</h1><section><h2>Selected Impact</h2><ul><!-- SELECTED_IMPACT_ITEMS --></ul></section><section>{{resume.skills}}</section><section><h2>Professional Experience</h2><ul><!-- SYNTHETIC_LABS_BULLETS --></ul></section></body></html>`;
+  const candidate = profile();
+  const achievements = ["Impact one.", "Impact two.", "Impact three.", "Impact four.", "Experience only."];
+  const html = renderResumeTemplate(template, {
+    personal: candidate.personal,
+    content: {
+      headline: "Frontend Engineer",
+      summary: null,
+      skills: ["Algorithms"],
+      experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements }],
+      education: [],
+    },
+  });
+
+  for (const achievement of achievements) assert.equal(html.match(new RegExp(achievement.replace(".", "\\."), "g"))?.length, 1);
+  assert.match(html, /Selected Impact[\s\S]*Impact one\.[\s\S]*Impact four\./);
+  assert.match(html, /Professional Experience[\s\S]*Experience only\./);
+  assert.match(html, /Algorithms/);
+});
+
+test("Selected Impact emits no items when fewer than two achievements can be reserved", () => {
+  const template = `<!doctype html><html><body><h1>{{resume.name}}</h1><section><h2>Selected Impact</h2><ul>{{resume.selected_impact}}</ul></section><section><h2>Professional Experience</h2>{{resume.experience}}</section></body></html>`;
+  const candidate = profile();
+  const html = renderResumeTemplate(template, {
+    personal: candidate.personal,
+    content: {
+      headline: "Frontend Engineer",
+      summary: null,
+      skills: ["Algorithms"],
+      experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["Only verified achievement."] }],
+      education: [],
+    },
+  });
+
+  assert.match(html, /Selected Impact<\/h2><ul><\/ul>/);
+  assert.equal(html.match(/Only verified achievement\./g)?.length, 1);
 });

@@ -380,6 +380,7 @@ export function materializeResumeContent(profile: CandidateProfile, value: unkno
   if (!Array.isArray(value.experience) || value.experience.length < 1 || value.experience.length > profile.experience.length) return { ok: false, message: "The model experience selection is invalid." };
   const experienceById = new Map(profile.experience.map((experience) => [experience.id, experience]));
   const selected = new Set<string>();
+  const usedAchievementIds = new Set<string>();
   const experience: GeneratedCvContent["experience"] = [];
   for (const item of value.experience) {
     if (!isRecord(item) || !hasOnlyKeys(item, ["experienceId", "bullets"]) || typeof item.experienceId !== "string" || !Array.isArray(item.bullets) || item.bullets.length < 1 || item.bullets.length > 12 || selected.has(item.experienceId)) return { ok: false, message: "The model experience selection is invalid." };
@@ -392,6 +393,9 @@ export function materializeResumeContent(profile: CandidateProfile, value: unkno
       if (!isRecord(bullet) || !hasOnlyKeys(bullet, ["text", "sourceAchievementIds"]) || typeof bullet.text !== "string" || bullet.text.trim().length < 10 || bullet.text.length > 600 || /<[a-z][^>]*>/i.test(bullet.text)) return { ok: false, message: "A model resume bullet is invalid." };
       const sourceIds = stringList(bullet.sourceAchievementIds, "resume bullet sources", 4, 64);
       if (!sourceIds.ok || sourceIds.data.length === 0 || !sourceIds.data.every((id) => sourceById.has(id))) return { ok: false, message: "Every resume bullet must cite verified achievements from the same experience." };
+      const achievementKeys = sourceIds.data.map((id) => `${item.experienceId}:${id}`);
+      if (achievementKeys.some((key) => usedAchievementIds.has(key))) continue;
+      achievementKeys.forEach((key) => usedAchievementIds.add(key));
       const sourceText = sourceIds.data.map((id) => sourceById.get(id) ?? "").join(" ");
       const safeBullet = containsUnsupportedClaim(bullet.text, sourceText) || numbers(bullet.text).some((number) => !sourceText.includes(number)) ? sourceText : bullet.text.trim();
       achievements.push(safeBullet);
