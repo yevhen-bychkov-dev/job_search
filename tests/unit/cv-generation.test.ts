@@ -47,9 +47,9 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.match(JSON.stringify(resumeRequest), /Approved skill snapshot/);
   assert.match(JSON.stringify(resumeRequest), /not as the complete skills list/);
   assert.match(JSON.stringify(resumeRequest), /complementary selection from the verified candidate skills/);
-  assert.match(JSON.stringify(resumeRequest), /never reuse the same source achievement, metric, project, outcome, or responsibility/);
-  assert.match(JSON.stringify(resumeRequest), /2–4 leading bullets can be promoted to Selected Impact and removed from Professional Experience/);
-  assert.match(JSON.stringify(resumeRequest), /Reasonable approximate quantitative framing is allowed only when strongly implied/);
+  assert.match(JSON.stringify(resumeRequest), /Generate Selected Impact separately from Professional Experience/);
+  assert.match(JSON.stringify(resumeRequest), /do not remove a useful Experience bullet/);
+  assert.match(JSON.stringify(resumeConfig.responseJsonSchema), /Separate vacancy-specific senior-level impact statements/);
   assert.match(JSON.stringify(resumeConfig.responseJsonSchema), /never only vacancy keywords/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /mustHaveTechnical/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /alex@example\.test|Alex Example|linkedin\.com/i);
@@ -128,7 +128,7 @@ test("Gemini response extraction distinguishes invalid, empty, and truncated out
 });
 
 test("stored content validation and CV versioning remain deterministic", () => {
-  const content = { headline: "Frontend Engineer", summary: null, skills: ["React"], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["A".repeat(600)] }], education: [] };
+  const content = { headline: "Frontend Engineer", summary: null, skills: ["React"], selectedImpact: ["Vacancy-specific verified impact."], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["A".repeat(600)] }], education: [] };
   assert.equal(parseGeneratedCvContent(content).ok, true);
   content.experience[0].achievements = ["A".repeat(601)];
   assert.equal(parseGeneratedCvContent(content).ok, false);
@@ -137,6 +137,18 @@ test("stored content validation and CV versioning remain deterministic", () => {
 });
 
 test("legacy stored CV content remains readable without weakening new writes", () => {
+  const previousCurrentContent = {
+    headline: "Frontend Engineer",
+    summary: null,
+    skills: ["React"],
+    experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["A".repeat(600)] }],
+    education: [],
+  };
+  const previousCurrent = parseStoredGeneratedCvContent(previousCurrentContent);
+  if (!previousCurrent.ok) assert.fail(previousCurrent.message);
+  assert.deepEqual(previousCurrent.data.selectedImpact, []);
+  assert.equal(previousCurrent.data.experience[0].achievements[0].length, 600);
+
   const legacyContent = {
     headline: "",
     summary: "",
@@ -150,5 +162,6 @@ test("legacy stored CV content remains readable without weakening new writes", (
   assert.equal(stored.data.headline, null);
   assert.equal(stored.data.experience[0].startDate, null);
   assert.equal(stored.data.education[0].degree, null);
+  assert.deepEqual(stored.data.selectedImpact, []);
   assert.deepEqual(stored.data.experience[0].achievements, []);
 });

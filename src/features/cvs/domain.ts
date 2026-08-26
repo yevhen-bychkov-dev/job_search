@@ -344,7 +344,7 @@ function candidateEvidence(profile: CandidateProfile): string[] {
 }
 
 export function materializeResumeContent(profile: CandidateProfile, value: unknown, approvedSkills: readonly ApprovedResumeSkill[]): ParseResult<GeneratedCvContent> {
-  if (!isRecord(value) || !hasOnlyKeys(value, ["headline", "summary", "skills", "experience", "educationIds"])) return { ok: false, message: "The model resume contains unsupported fields." };
+  if (!isRecord(value) || !hasOnlyKeys(value, ["headline", "summary", "skills", "selectedImpact", "experience", "educationIds"])) return { ok: false, message: "The model resume contains unsupported fields." };
   const headline = value.headline === null ? null : typeof value.headline === "string" && value.headline.trim().length > 0 && value.headline.length <= 160 ? value.headline.trim() : null;
   const summary = value.summary === null ? null : typeof value.summary === "string" && value.summary.trim().length > 0 && value.summary.length <= 1200 ? value.summary.trim() : null;
   if ((value.headline !== null && headline === null) || (value.summary !== null && summary === null)) return { ok: false, message: "The model resume headline or summary is invalid." };
@@ -377,8 +377,31 @@ export function materializeResumeContent(profile: CandidateProfile, value: unkno
     if (approved.level === "familiar") addSkill(`Familiar: ${approved.label}`);
   }
 
-  if (!Array.isArray(value.experience) || value.experience.length < 1 || value.experience.length > profile.experience.length) return { ok: false, message: "The model experience selection is invalid." };
   const experienceById = new Map(profile.experience.map((experience) => [experience.id, experience]));
+  if (!Array.isArray(value.selectedImpact) || value.selectedImpact.length > 4) return { ok: false, message: "The model Selected Impact is invalid." };
+  const selectedImpact: string[] = [];
+  const selectedImpactText = new Set<string>();
+  for (const item of value.selectedImpact) {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["text", "sources"]) || typeof item.text !== "string" || item.text.trim().length < 10 || item.text.length > 600 || /<[a-z][^>]*>/i.test(item.text) || !Array.isArray(item.sources) || item.sources.length < 1 || item.sources.length > 8) return { ok: false, message: "A Selected Impact statement is invalid." };
+    const sourceText: string[] = [];
+    const sourceKeys = new Set<string>();
+    for (const reference of item.sources) {
+      if (!isRecord(reference) || !hasOnlyKeys(reference, ["experienceId", "achievementId"]) || typeof reference.experienceId !== "string" || typeof reference.achievementId !== "string") return { ok: false, message: "Every Selected Impact statement must cite verified achievements." };
+      const source = experienceById.get(reference.experienceId)?.achievements.find((achievement) => achievement.id === reference.achievementId);
+      const sourceKey = `${reference.experienceId}:${reference.achievementId}`;
+      if (!source || sourceKeys.has(sourceKey)) return { ok: false, message: "Every Selected Impact statement must cite distinct verified achievements." };
+      sourceKeys.add(sourceKey);
+      sourceText.push(source.text);
+    }
+    const text = item.text.trim();
+    const textKey = normalized(text);
+    const evidence = sourceText.join(" ");
+    if (selectedImpactText.has(textKey) || containsUnsupportedClaim(text, evidence) || numbers(text).some((number) => !evidence.includes(number))) continue;
+    selectedImpactText.add(textKey);
+    selectedImpact.push(text);
+  }
+
+  if (!Array.isArray(value.experience) || value.experience.length < 1 || value.experience.length > profile.experience.length) return { ok: false, message: "The model experience selection is invalid." };
   const selected = new Set<string>();
   const usedAchievementIds = new Set<string>();
   const experience: GeneratedCvContent["experience"] = [];
@@ -413,7 +436,7 @@ export function materializeResumeContent(profile: CandidateProfile, value: unkno
   const allSourceText = candidateEvidence(profile).join(" ");
   const safeHeadline = headline && (containsUnsupportedClaim(headline, allSourceText) || numbers(headline).some((number) => !allSourceText.includes(number))) ? profile.personal.title : headline;
   const safeSummary = summary && (containsUnsupportedClaim(summary, allSourceText) || numbers(summary).some((number) => !allSourceText.includes(number))) ? profile.summary : summary;
-  return { ok: true, data: { headline: safeHeadline ?? profile.personal.title, summary: safeSummary, skills, experience, education } };
+  return { ok: true, data: { headline: safeHeadline ?? profile.personal.title, summary: safeSummary, skills, selectedImpact, experience, education } };
 }
 
 export function nextCvVersion(versions: readonly number[]): number {
@@ -421,10 +444,11 @@ export function nextCvVersion(versions: readonly number[]): number {
 }
 
 export function parseGeneratedCvContent(value: unknown): ParseResult<GeneratedCvContent> {
-  if (!isRecord(value) || !hasOnlyKeys(value, ["headline", "summary", "skills", "experience", "education"])) return { ok: false, message: "Stored CV content is invalid." };
+  if (!isRecord(value) || !hasOnlyKeys(value, ["headline", "summary", "skills", "selectedImpact", "experience", "education"])) return { ok: false, message: "Stored CV content is invalid." };
   const nullableText = (candidate: unknown, maximum: number) => candidate === null || (typeof candidate === "string" && candidate.trim().length > 0 && candidate.length <= maximum);
   const skills = stringList(value.skills, "skills", 100, 100);
-  if (!nullableText(value.headline, 160) || !nullableText(value.summary, 1200) || !skills.ok || !Array.isArray(value.experience) || value.experience.length < 1 || value.experience.length > 20 || !Array.isArray(value.education) || value.education.length > 20) return { ok: false, message: "Stored CV content is invalid." };
+  const selectedImpact = stringList(value.selectedImpact, "selectedImpact", 4, 600);
+  if (!nullableText(value.headline, 160) || !nullableText(value.summary, 1200) || !skills.ok || !selectedImpact.ok || !Array.isArray(value.experience) || value.experience.length < 1 || value.experience.length > 20 || !Array.isArray(value.education) || value.education.length > 20) return { ok: false, message: "Stored CV content is invalid." };
   const experience: GeneratedCvContent["experience"] = [];
   for (const item of value.experience) {
     if (!isRecord(item) || !hasOnlyKeys(item, ["company", "role", "startDate", "endDate", "technologies", "achievements"])) return { ok: false, message: "Stored CV experience is invalid." };
@@ -438,7 +462,7 @@ export function parseGeneratedCvContent(value: unknown): ParseResult<GeneratedCv
     if (!isRecord(item) || !hasOnlyKeys(item, ["institution", "degree", "startDate", "endDate"]) || typeof item.institution !== "string" || !item.institution.trim() || item.institution.length > 160 || !nullableText(item.degree, 200) || !nullableText(item.startDate, 10) || !nullableText(item.endDate, 10)) return { ok: false, message: "Stored CV education is invalid." };
     education.push({ institution: item.institution, degree: item.degree as string | null, startDate: item.startDate as string | null, endDate: item.endDate as string | null });
   }
-  return { ok: true, data: { headline: value.headline as string | null, summary: value.summary as string | null, skills: skills.data, experience, education } };
+  return { ok: true, data: { headline: value.headline as string | null, summary: value.summary as string | null, skills: skills.data, selectedImpact: selectedImpact.data, experience, education } };
 }
 
 function legacyStoredStringList(value: unknown, maximumItems: number): ParseResult<string[]> {
@@ -462,6 +486,10 @@ function legacyStoredNullableText(value: unknown): string | null | undefined {
 export function parseStoredGeneratedCvContent(value: unknown): ParseResult<GeneratedCvContent> {
   const current = parseGeneratedCvContent(value);
   if (current.ok) return current;
+  if (isRecord(value) && !("selectedImpact" in value)) {
+    const upgraded = parseGeneratedCvContent({ ...value, selectedImpact: [] });
+    if (upgraded.ok) return upgraded;
+  }
   if (!isRecord(value) || !hasOnlyKeys(value, ["headline", "summary", "skills", "experience", "education"])) return current;
 
   const headline = legacyStoredNullableText(value.headline);
@@ -490,5 +518,5 @@ export function parseStoredGeneratedCvContent(value: unknown): ParseResult<Gener
     education.push({ institution: item.institution.trim(), degree, startDate, endDate });
   }
 
-  return { ok: true, data: { headline, summary, skills: skills.data, experience, education } };
+  return { ok: true, data: { headline, summary, skills: skills.data, selectedImpact: [], experience, education } };
 }

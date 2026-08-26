@@ -2,6 +2,7 @@ export type GeneratedCvContent = {
   headline: string | null;
   summary: string | null;
   skills: string[];
+  selectedImpact: string[];
   experience: Array<{
     company: string;
     role: string;

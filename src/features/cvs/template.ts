@@ -178,39 +178,16 @@ function skillGroupsHtml(skills: string[]): string {
   return `<div class="resume-skill-columns" style="grid-column: 1 / -1; column-count: ${columnCount}; column-gap: 12mm; column-fill: balance; break-inside: avoid; page-break-inside: avoid; break-after: auto; page-break-after: auto;">${orderedGroups.map((group) => resumeSkillGroupHtml(group.title, group.skills)).join("")}</div>`;
 }
 
-type SelectedImpact = {
-  achievements: string[];
-  indexesByExperience: ReadonlyMap<number, ReadonlySet<number>>;
-};
-
-function selectedImpact(content: GeneratedCvContent): SelectedImpact {
-  const availableCount = content.experience.reduce((count, experience) => count + Math.max(0, experience.achievements.length - 1), 0);
-  if (availableCount < 2) return { achievements: [], indexesByExperience: new Map() };
-
-  const achievements: string[] = [];
-  const indexesByExperience = new Map<number, Set<number>>();
-  for (const [experienceIndex, experience] of content.experience.entries()) {
-    const selectedIndexes = new Set<number>();
-    for (let achievementIndex = 0; achievementIndex < experience.achievements.length - 1 && achievements.length < 4; achievementIndex += 1) {
-      selectedIndexes.add(achievementIndex);
-      achievements.push(experience.achievements[achievementIndex]);
-    }
-    if (selectedIndexes.size > 0) indexesByExperience.set(experienceIndex, selectedIndexes);
-    if (achievements.length === 4) break;
-  }
-  return { achievements, indexesByExperience };
-}
-
-function experienceHtml(content: GeneratedCvContent, impact: SelectedImpact): string {
-  return content.experience.map((experience, experienceIndex) => `<section class="resume-experience-item"><h3>${escapeHtml(experience.role)} · ${escapeHtml(experience.company)}</h3><p class="resume-dates">${escapeHtml(dateRange(experience.startDate, experience.endDate))}</p><ul>${experience.achievements.filter((_achievement, achievementIndex) => !impact.indexesByExperience.get(experienceIndex)?.has(achievementIndex)).map((achievement) => `<li>${escapeHtml(achievement)}</li>`).join("")}</ul></section>`).join("");
+function experienceHtml(content: GeneratedCvContent): string {
+  return content.experience.map((experience) => `<section class="resume-experience-item"><h3>${escapeHtml(experience.role)} · ${escapeHtml(experience.company)}</h3><p class="resume-dates">${escapeHtml(dateRange(experience.startDate, experience.endDate))}</p><ul>${experience.achievements.map((achievement) => `<li>${escapeHtml(achievement)}</li>`).join("")}</ul></section>`).join("");
 }
 
 function educationHtml(content: GeneratedCvContent): string {
   return content.education.map((education) => `<section class="resume-education-item"><h3>${escapeHtml(education.degree ?? education.institution)}</h3><p>${escapeHtml(education.institution)}${education.startDate || education.endDate ? ` · ${escapeHtml(dateRange(education.startDate, education.endDate))}` : ""}</p></section>`).join("");
 }
 
-function selectedImpactHtml(impact: SelectedImpact): string {
-  return impact.achievements
+function selectedImpactHtml(content: GeneratedCvContent): string {
+  return (content.selectedImpact ?? [])
     .map((achievement) => `<li>${escapeHtml(achievement)}</li>`)
     .join("");
 }
@@ -220,7 +197,7 @@ function linkValue(links: Record<string, string>, label: string): string {
   return entry ? escapeHtml(entry[1]) : "";
 }
 
-function legacyExperienceMarkers(html: string, content: GeneratedCvContent, impact: SelectedImpact): string {
+function legacyExperienceMarkers(html: string, content: GeneratedCvContent): string {
   const used = new Set<number>();
   let fallbackIndex = 0;
   return html.replace(/<!--\s*([A-Z][A-Z0-9_]*)_BULLETS\s*-->/g, (_match, marker: string) => {
@@ -233,7 +210,7 @@ function legacyExperienceMarkers(html: string, content: GeneratedCvContent, impa
     if (index < 0 && fallbackIndex < content.experience.length) index = fallbackIndex;
     if (index < 0) return "";
     used.add(index);
-    return content.experience[index].achievements.filter((_achievement, achievementIndex) => !impact.indexesByExperience.get(index)?.has(achievementIndex)).map((achievement) => `<li>${escapeHtml(achievement)}</li>`).join("");
+    return content.experience[index].achievements.map((achievement) => `<li>${escapeHtml(achievement)}</li>`).join("");
   });
 }
 
@@ -252,7 +229,6 @@ export type ResumeTemplateRenderInput = {
 export function renderResumeTemplate(templateHtml: string, input: ResumeTemplateRenderInput): string {
   const validation = validateResumeTemplateText(templateHtml);
   if (validation) throw new Error(validation);
-  const impact = selectedImpact(input.content);
   const values: Record<string, string> = {
     "resume.name": escapeHtml(input.personal.name),
     // Uploaded templates commonly use resume.title for the top heading. The
@@ -267,16 +243,16 @@ export function renderResumeTemplate(templateHtml: string, input: ResumeTemplate
     "resume.headline": escapeHtml(input.content.headline ?? ""),
     "resume.summary": escapeHtml(input.content.summary ?? ""),
     "resume.professional_summary": escapeHtml(input.content.summary ?? ""),
-    "resume.selected_impact": selectedImpactHtml(impact),
+    "resume.selected_impact": selectedImpactHtml(input.content),
     "resume.skills": skillsHtml(input.content.skills),
     "resume.skill_groups": skillGroupsHtml(input.content.skills),
-    "resume.experience": experienceHtml(input.content, impact),
+    "resume.experience": experienceHtml(input.content),
     "resume.education": educationHtml(input.content),
   };
   let rendered = templateHtml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, token: string) => values[token.trim()] ?? "");
-  rendered = rendered.replace(/<!--\s*SELECTED_IMPACT_ITEMS\s*-->/g, selectedImpactHtml(impact));
+  rendered = rendered.replace(/<!--\s*SELECTED_IMPACT_ITEMS\s*-->/g, selectedImpactHtml(input.content));
   rendered = rendered.replace(/<!--\s*SKILL_GROUPS\s*-->/g, skillGroupsHtml(input.content.skills));
-  rendered = legacyExperienceMarkers(rendered, input.content, impact);
+  rendered = legacyExperienceMarkers(rendered, input.content);
   if (/\{\{[^}]+\}\}/.test(rendered) || /<!--\s*(?:SELECTED_IMPACT_ITEMS|SKILL_GROUPS|[A-Z][A-Z0-9_]*_BULLETS)\s*-->/.test(rendered)) throw new Error("The HTML template contains an unresolved resume placeholder.");
   return withPrintPaginationSafeguard(rendered);
 }

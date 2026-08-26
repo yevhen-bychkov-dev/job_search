@@ -77,6 +77,12 @@ test("invalid legacy requirement edits can be rebuilt as an unapproved draft", (
 
 test("approved skills are authoritative in generated content and unsupported claims fall back to cited facts", () => {
   const candidate = profile();
+  candidate.experience[0].achievements.push({
+    id: "verified-performance",
+    text: "Improved page latency by 30% across internal applications.",
+    skills: ["React", "Web performance"],
+    categories: ["performance"],
+  });
   const analysisResult = materializeVacancyAnalysis(RAW_SKILLS, JOB, candidate);
   if (!analysisResult.ok) assert.fail(analysisResult.message);
   const approvedSkills = [
@@ -86,6 +92,13 @@ test("approved skills are authoritative in generated content and unsupported cla
   ];
   const raw = deterministicResume({ job: JOB, candidate: candidateProfileForAi(candidate), analysis: analysisResult.data, approvedSkills });
   raw.skills = ["React", "AWS", "Invented Platform"];
+  raw.selectedImpact = [{
+    text: "Delivered accessible shared components and improved page latency by 30% across internal applications.",
+    sources: [
+      { experienceId: "synthetic-labs-frontend", achievementId: "accessible-design-system" },
+      { experienceId: "synthetic-labs-frontend", achievementId: "verified-performance" },
+    ],
+  }];
   const experiences = raw.experience as Array<{ experienceId: string; bullets: Array<{ text: string; sourceAchievementIds: string[] }> }>;
   experiences[0].bullets[0].text = "Managed 8 engineers and increased revenue by 20%.";
   experiences[0].bullets.push({ text: "Paraphrased duplicate of the same achievement.", sourceAchievementIds: [...experiences[0].bullets[0].sourceAchievementIds] });
@@ -93,7 +106,9 @@ test("approved skills are authoritative in generated content and unsupported cla
   if (!materialized.ok) assert.fail(materialized.message);
   assert.deepEqual(materialized.data.skills, ["React", "Familiar: GraphQL"]);
   assert.equal(materialized.data.experience[0].achievements[0], "Built accessible shared components used across internal applications.");
-  assert.equal(materialized.data.experience[0].achievements.length, 1);
+  assert.equal(materialized.data.experience[0].achievements[1], "Improved page latency by 30% across internal applications.");
+  assert.equal(materialized.data.experience[0].achievements.length, 2);
+  assert.deepEqual(materialized.data.selectedImpact, ["Delivered accessible shared components and improved page latency by 30% across internal applications."]);
 });
 
 test("template validation blocks executable content and supports supplied-template legacy markers", () => {
@@ -106,7 +121,7 @@ test("template validation blocks executable content and supports supplied-templa
   </body></html>`;
   assert.equal(validateResumeTemplateText(template), "");
   const candidate = profile();
-  const html = renderResumeTemplate(template, { personal: { ...candidate.personal, name: "<Synthetic>" }, content: { headline: "Product Engineer", summary: "Verified summary.", skills: ["React", "Familiar: GraphQL", "Jest", "Node.js", "Synthetic Platform"], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["Built <safe> components."] }], education: [] } });
+  const html = renderResumeTemplate(template, { personal: { ...candidate.personal, name: "<Synthetic>" }, content: { headline: "Product Engineer", summary: "Verified summary.", skills: ["React", "Familiar: GraphQL", "Jest", "Node.js", "Synthetic Platform"], selectedImpact: ["Delivered vacancy-specific impact safely."], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["Built <safe> components."] }], education: [] } });
   assert.match(html, /&lt;Synthetic&gt;/);
   assert.match(html, /Product Engineer/);
   assert.match(html, /Built &lt;safe&gt; components\./);
@@ -129,28 +144,30 @@ test("template validation blocks executable content and supports supplied-templa
   assert.doesNotMatch(html, /\{\{resume|SELECTED_IMPACT_ITEMS|_BULLETS|SKILL_GROUPS/);
 });
 
-test("Selected Impact reserves two to four achievements without repeating them in experience", () => {
+test("Selected Impact renders separately without removing Professional Experience bullets", () => {
   const template = `<!doctype html><html><body><h1>{{resume.name}}</h1><section><h2>Selected Impact</h2><ul><!-- SELECTED_IMPACT_ITEMS --></ul></section><section>{{resume.skills}}</section><section><h2>Professional Experience</h2><ul><!-- SYNTHETIC_LABS_BULLETS --></ul></section></body></html>`;
   const candidate = profile();
-  const achievements = ["Impact one.", "Impact two.", "Impact three.", "Impact four.", "Experience only."];
+  const achievements = ["Concrete experience one.", "Concrete experience two.", "Concrete experience three."];
+  const selectedImpact = ["Senior synthesis across verified work.", "Vacancy-specific architectural impact."];
   const html = renderResumeTemplate(template, {
     personal: candidate.personal,
     content: {
       headline: "Frontend Engineer",
       summary: null,
       skills: ["Algorithms"],
+      selectedImpact,
       experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements }],
       education: [],
     },
   });
 
-  for (const achievement of achievements) assert.equal(html.match(new RegExp(achievement.replace(".", "\\."), "g"))?.length, 1);
-  assert.match(html, /Selected Impact[\s\S]*Impact one\.[\s\S]*Impact four\./);
-  assert.match(html, /Professional Experience[\s\S]*Experience only\./);
+  for (const achievement of [...selectedImpact, ...achievements]) assert.equal(html.match(new RegExp(achievement.replace(".", "\\."), "g"))?.length, 1);
+  assert.match(html, /Selected Impact[\s\S]*Senior synthesis across verified work\.[\s\S]*Vacancy-specific architectural impact\./);
+  assert.match(html, /Professional Experience[\s\S]*Concrete experience one\.[\s\S]*Concrete experience three\./);
   assert.match(html, /Algorithms/);
 });
 
-test("Selected Impact emits no items when fewer than two achievements can be reserved", () => {
+test("Selected Impact may be empty without removing Professional Experience", () => {
   const template = `<!doctype html><html><body><h1>{{resume.name}}</h1><section><h2>Selected Impact</h2><ul>{{resume.selected_impact}}</ul></section><section><h2>Professional Experience</h2>{{resume.experience}}</section></body></html>`;
   const candidate = profile();
   const html = renderResumeTemplate(template, {
@@ -159,6 +176,7 @@ test("Selected Impact emits no items when fewer than two achievements can be res
       headline: "Frontend Engineer",
       summary: null,
       skills: ["Algorithms"],
+      selectedImpact: [],
       experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["Only verified achievement."] }],
       education: [],
     },

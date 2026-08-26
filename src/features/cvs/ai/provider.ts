@@ -77,7 +77,7 @@ export function resumeContentJsonSchema(): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["headline", "summary", "skills", "experience", "educationIds"],
+    required: ["headline", "summary", "skills", "selectedImpact", "experience", "educationIds"],
     properties: {
       headline: { type: "string", description: "A truthful vacancy-specific professional headline." },
       summary: { type: "string", description: "A concise tailored summary grounded only in the verified profile." },
@@ -85,6 +85,30 @@ export function resumeContentJsonSchema(): Record<string, unknown> {
         type: "array",
         description: "A vacancy-prioritized blend of approved skills and complementary verified candidate skills; never only vacancy keywords.",
         items: { type: "string" },
+      },
+      selectedImpact: {
+        type: "array",
+        description: "Separate vacancy-specific senior-level impact statements synthesized from cited verified achievements, not copied Experience bullets.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["text", "sources"],
+          properties: {
+            text: { type: "string" },
+            sources: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["experienceId", "achievementId"],
+                properties: {
+                  experienceId: { type: "string" },
+                  achievementId: { type: "string" },
+                },
+              },
+            },
+          },
+        },
       },
       experience: {
         type: "array",
@@ -133,6 +157,7 @@ export function deterministicResume(input: GenerateCvInput): Record<string, unkn
       ? `${input.job.title} focused on ${approved.slice(0, 3).join(", ") || input.candidate.professionalTitle || "product engineering"}.`
       : input.candidate.summary,
     skills: approved,
+    selectedImpact: [],
     experience: input.candidate.experience.map((experience) => ({
       experienceId: experience.id,
       bullets: experience.achievements.map((achievement) => ({ text: achievement.text, sourceAchievementIds: [achievement.id] })),
