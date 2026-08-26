@@ -33,7 +33,8 @@ test("vacancy extraction is strict and deterministic matching supplements config
   assert.equal(parsed.data.mustHaveTechnical.find(({ label }) => label === "GraphQL")?.status, "unconfirmed");
   assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, extra: true }, JOB, profile()).ok, false);
   assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, skills: [{ label: "GraphQL", category: "invented", importance: "must_have" }] }, JOB, profile()).ok, false);
-  assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, skills: Array.from({ length: 41 }, (_, index) => ({ label: `Synthetic skill ${index}`, category: "technical", importance: "nice_to_have" })) }, JOB, profile()).ok, false);
+  assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, skills: Array.from({ length: 60 }, (_, index) => ({ label: `Synthetic skill ${index}`, category: "technical", importance: "nice_to_have" })) }, JOB, profile()).ok, true);
+  assert.equal(materializeVacancyAnalysis({ ...RAW_SKILLS, skills: Array.from({ length: 81 }, (_, index) => ({ label: `Synthetic skill ${index}`, category: "technical", importance: "nice_to_have" })) }, JOB, profile()).ok, false);
 });
 
 test("skills are editable but every retained skill requires an explicit approval level", () => {

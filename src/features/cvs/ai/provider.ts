@@ -51,18 +51,18 @@ export function skillSuggestionJsonSchema(): Record<string, unknown> {
     properties: {
       skills: {
         type: "array",
-        description: "Distinct vacancy skills and requirements that materially affect resume tailoring.",
+        description: "Comprehensive, deduplicated inventory from the entire vacancy description: technical skills, tools, practices, domain knowledge, responsibilities, ownership, collaboration, and leadership expectations that materially affect candidate suitability or resume tailoring.",
         items: {
           type: "object",
           additionalProperties: false,
           required: ["label", "category", "importance"],
           properties: {
-            label: { type: "string", description: "Concise human-readable skill or requirement copied or faithfully normalized from the vacancy." },
+            label: { type: "string", description: "Concise standalone skill or expectation copied or faithfully normalized from anywhere in the vacancy." },
             category: {
               type: "string",
               enum: ["technical", "tooling", "architecture", "domain", "responsibility", "ownership", "collaboration", "leadership"],
             },
-            importance: { type: "string", enum: ["must_have", "nice_to_have"] },
+            importance: { type: "string", description: "must_have for required, expected, or core-role items; nice_to_have only for explicitly preferred, bonus, optional, or advantage items.", enum: ["must_have", "nice_to_have"] },
           },
         },
       },

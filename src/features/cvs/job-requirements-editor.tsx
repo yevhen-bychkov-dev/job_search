@@ -7,7 +7,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 
 import { analyzeRequirementsAction, saveRequirementsAction } from "./actions";
 import { GenerateCvForm } from "./generate-cv-form";
-import type { RequirementsActionState, SavedJobRequirement, JobRequirementLevel, VacancyAnalysis } from "./types";
+import type { RequirementsActionState, SavedJobRequirement, JobRequirementLevel, VacancyAnalysis, VacancyRequirement } from "./types";
 import { INITIAL_REQUIREMENTS_ACTION_STATE, JOB_REQUIREMENT_LEVELS } from "./types";
 
 function Feedback({ state }: { state: RequirementsActionState }) {
@@ -39,6 +39,22 @@ function approvalComparable(requirements: SavedJobRequirement[]): string {
   return JSON.stringify(requirements.map(({ key, label, category, importance, section, level }) => ({ key, label, category, importance, section, level })));
 }
 
+const REQUIREMENT_CATEGORIES: Array<{ category: VacancyRequirement["category"]; label: string }> = [
+  { category: "technical", label: "Technical skills" },
+  { category: "tooling", label: "Tools & platforms" },
+  { category: "architecture", label: "Architecture & engineering practices" },
+  { category: "domain", label: "Domain knowledge" },
+  { category: "responsibility", label: "Delivery responsibilities" },
+  { category: "ownership", label: "Ownership expectations" },
+  { category: "collaboration", label: "Collaboration & communication" },
+  { category: "leadership", label: "Leadership expectations" },
+];
+
+const IMPORTANCE_GROUPS = [
+  { importance: "must_have", label: "Required skills & expectations", description: "Required, expected, or central to the role." },
+  { importance: "nice_to_have", label: "Preferred skills & advantages", description: "Preferred, optional, bonus, or described as an advantage." },
+] as const;
+
 export function JobRequirementsEditor({ jobId, initialAnalysis, initialRequirements, initialApprovedAt, canAnalyze, hasResumeTemplate }: { jobId: string; initialAnalysis: VacancyAnalysis | null; initialRequirements: SavedJobRequirement[]; initialApprovedAt: string | null; canAnalyze: boolean; hasResumeTemplate: boolean }) {
   const router = useRouter();
   const [requirements] = useState(initialRequirements);
@@ -54,6 +70,14 @@ export function JobRequirementsEditor({ jobId, initialAnalysis, initialRequireme
   const hasUnsavedChanges = approvalComparable(shownRequirements) !== approvalComparable(approvedRequirements);
   const hasApprovedSkills = shownRequirements.length > 0 && shownRequirements.every((requirement) => requirement.level !== "unconfirmed");
   const canGenerate = hasResumeTemplate && Boolean(approvedAt) && hasApprovedSkills && !hasUnsavedChanges;
+  const groupedRequirements = useMemo(() => IMPORTANCE_GROUPS.map((importanceGroup) => ({
+    ...importanceGroup,
+    count: shownRequirements.filter((requirement) => requirement.importance === importanceGroup.importance).length,
+    categories: REQUIREMENT_CATEGORIES.map((category) => ({
+      ...category,
+      requirements: shownRequirements.filter((requirement) => requirement.importance === importanceGroup.importance && requirement.category === category.category),
+    })).filter((category) => category.requirements.length > 0),
+  })).filter((group) => group.count > 0), [shownRequirements]);
   useEffect(() => {
     if (saveState.status === "success") router.refresh();
   }, [router, saveState.status]);
@@ -71,16 +95,22 @@ export function JobRequirementsEditor({ jobId, initialAnalysis, initialRequireme
   }
 
   return <section className="job-requirements-editor" aria-labelledby="job-requirements-heading">
-    <div className="section-heading"><div><p className="eyebrow">Saved for this vacancy</p><h3 id="job-requirements-heading">Approved resume skills</h3></div><span className="count-pill">{shownRequirements.length}</span></div>
-    <p className="muted">Gemini extracts vacancy-only suggestions. The app matches them to your verified Candidate Profile; you make the final approval decision.</p>
+    <div className="section-heading"><div><p className="eyebrow">Full vacancy analysis</p><h3 id="job-requirements-heading">Skills &amp; expectations</h3></div><span className="count-pill">{shownRequirements.length}</span></div>
+    <p className="muted">Gemini reads the full description and organizes its required and preferred skills, tools, domain knowledge, and working expectations. The app matches them to your verified Candidate Profile; you make the final approval decision.</p>
     {shownRequirements.length === 0 && canAnalyze ? <form action={analyzeAction} className="stack"><SubmitButton pendingLabel="Analyzing vacancy skills…">Analyze job &amp; suggest skills</SubmitButton><Feedback state={analyzeState} /></form> : null}
     {shownRequirements.length === 0 && !canAnalyze ? <p className="alert alert-error" role="alert">Add a Candidate Profile before analyzing vacancy skills.</p> : null}
     {shownRequirements.length > 0 ? <form action={saveAction} className="stack">
-      <div className="job-requirements-list">{shownRequirements.map((requirement) => <div className="job-requirement-row" key={requirement.key}>
-        <label><span className="sr-only">Skill</span><input value={requirement.label} onChange={(event) => updateRequirement(requirement.key, { label: event.target.value })} placeholder="Vacancy skill" maxLength={160} /></label>
-        <label><span className="sr-only">Experience level for {requirement.label || "skill"}</span><select value={requirement.level} onChange={(event) => updateRequirement(requirement.key, { level: event.target.value as JobRequirementLevel })}>{JOB_REQUIREMENT_LEVELS.map((level) => <option value={level} key={level}>{levelLabel(level)}</option>)}</select></label>
-        <button type="button" className="icon-button" aria-label={`Delete skill ${requirement.label || "without label"}`} onClick={() => removeRequirement(requirement.key)}>×</button>
-      </div>)}</div>
+      <div className="job-requirements-groups">{groupedRequirements.map((group) => <section className="job-requirement-importance-group" aria-labelledby={`requirements-${group.importance}`} key={group.importance}>
+        <div className="job-requirement-group-heading"><div><h4 id={`requirements-${group.importance}`}>{group.label}</h4><p>{group.description}</p></div><span className="count-pill">{group.count}</span></div>
+        <div className="job-requirement-category-list">{group.categories.map((category) => <fieldset className="job-requirement-category" key={category.category}>
+          <legend>{category.label} <span>{category.requirements.length}</span></legend>
+          <div className="job-requirements-list">{category.requirements.map((requirement) => <div className="job-requirement-row" key={requirement.key}>
+            <label><span className="sr-only">Skill or expectation</span><input value={requirement.label} onChange={(event) => updateRequirement(requirement.key, { label: event.target.value })} placeholder="Vacancy skill or expectation" maxLength={160} /></label>
+            <label><span className="sr-only">Experience level for {requirement.label || "skill"}</span><select value={requirement.level} onChange={(event) => updateRequirement(requirement.key, { level: event.target.value as JobRequirementLevel })}>{JOB_REQUIREMENT_LEVELS.map((level) => <option value={level} key={level}>{levelLabel(level)}</option>)}</select></label>
+            <button type="button" className="icon-button" aria-label={`Delete skill ${requirement.label || "without label"}`} onClick={() => removeRequirement(requirement.key)}>×</button>
+          </div>)}</div>
+        </fieldset>)}</div>
+      </section>)}</div>
       <input type="hidden" name="requirements" value={serialized} />
       <input type="hidden" name="analysis" value={serializedAnalysis} />
       <div className="button-row"><button type="button" className="button button-secondary" onClick={addRequirement}>＋ Add skill</button><SubmitButton pendingLabel="Approving skills…">Approve skills</SubmitButton></div>

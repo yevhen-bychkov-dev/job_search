@@ -337,6 +337,8 @@ test("generate immutable CV versions from approved skills and prevent duplicate 
   await expect(page.getByText("No CVs generated for this job yet.")).toBeVisible();
   await page.getByRole("button", { name: "Analyze job & suggest skills", exact: true }).click();
   await expect(page.getByRole("button", { name: "Analyzing vacancy skills…" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "Required skills & expectations", exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: /Technical skills/ })).toBeVisible();
   await expect(page.locator('input[value="GraphQL"]')).toBeVisible();
   await page.getByLabel("Experience level for GraphQL").selectOption("commercial");
   await page.getByRole("button", { name: "Approve skills", exact: true }).click();

@@ -77,7 +77,7 @@ function uniqueRequirementKey(label: string, used: Set<string>): string {
 
 export function parseSkillSuggestionResult(value: unknown): ParseResult<SkillSuggestionResult> {
   const fields = ["skills", "senioritySignals", "atsKeywords", "employerTerminology"] as const;
-  if (!isRecord(value) || !hasOnlyKeys(value, fields) || !Array.isArray(value.skills) || value.skills.length < 1 || value.skills.length > 40) {
+  if (!isRecord(value) || !hasOnlyKeys(value, fields) || !Array.isArray(value.skills) || value.skills.length < 1 || value.skills.length > 80) {
     return { ok: false, message: "The model skill suggestions have an invalid structure." };
   }
   const skills: SkillSuggestion[] = [];

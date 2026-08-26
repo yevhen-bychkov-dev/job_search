@@ -40,10 +40,14 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.equal("responseSchema" in resumeConfig, false);
   assert.equal("thinkingConfig" in analysisConfig, false);
   assert.equal("thinkingConfig" in resumeConfig, false);
-  assert.equal(analysisConfig.maxOutputTokens, 2_048);
+  assert.equal(analysisConfig.maxOutputTokens, 4_096);
   assert.equal(resumeConfig.maxOutputTokens, 4_096);
   assert.equal("temperature" in analysisConfig, false);
   assert.equal("temperature" in resumeConfig, false);
+  assert.match(JSON.stringify(analysisRequest), /Read the entire vacancy/);
+  assert.match(JSON.stringify(analysisRequest), /Do not stop after the headline technologies/);
+  assert.match(JSON.stringify(analysisRequest), /full description/);
+  assert.match(JSON.stringify(analysisConfig.responseJsonSchema), /Comprehensive, deduplicated inventory from the entire vacancy description/);
   assert.match(JSON.stringify(resumeRequest), /Approved skill snapshot/);
   assert.match(JSON.stringify(resumeRequest), /not as the complete skills list/);
   assert.match(JSON.stringify(resumeRequest), /complementary selection from the verified candidate skills/);
