@@ -188,7 +188,7 @@ function educationHtml(content: GeneratedCvContent): string {
 
 function selectedImpactHtml(content: GeneratedCvContent): string {
   return (content.selectedImpact ?? [])
-    .map((achievement) => `<li>${escapeHtml(achievement)}</li>`)
+    .map((achievement) => `<li style="list-style: none;">${escapeHtml(achievement)}</li>`)
     .join("");
 }
 

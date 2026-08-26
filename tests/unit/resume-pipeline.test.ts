@@ -163,6 +163,7 @@ test("Selected Impact renders separately without removing Professional Experienc
 
   for (const achievement of [...selectedImpact, ...achievements]) assert.equal(html.match(new RegExp(achievement.replace(".", "\\."), "g"))?.length, 1);
   assert.match(html, /Selected Impact[\s\S]*Senior synthesis across verified work\.[\s\S]*Vacancy-specific architectural impact\./);
+  assert.equal(html.match(/<li style="list-style: none;">/g)?.length, selectedImpact.length);
   assert.match(html, /Professional Experience[\s\S]*Concrete experience one\.[\s\S]*Concrete experience three\./);
   assert.match(html, /Algorithms/);
 });
