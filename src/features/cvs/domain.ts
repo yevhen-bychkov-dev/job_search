@@ -3,6 +3,7 @@ import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
 import { JOB_REQUIREMENT_LEVELS, VACANCY_REQUIREMENT_SECTIONS } from "./types.ts";
 import type {
   ApprovedResumeSkill,
+  CvFitAssessmentContent,
   GeneratedCvContent,
   JobRequirementLevel,
   JobResumeRequirements,
@@ -441,6 +442,31 @@ export function materializeResumeContent(profile: CandidateProfile, value: unkno
 
 export function nextCvVersion(versions: readonly number[]): number {
   return versions.reduce((highest, version) => Number.isInteger(version) && version > highest ? version : highest, 0) + 1;
+}
+
+export function parseCvFitAssessment(value: unknown): ParseResult<CvFitAssessmentContent> {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["fitScore", "summary", "strengths", "gaps"])) {
+    return { ok: false, message: "The CV fit assessment has unsupported fields." };
+  }
+  if (!Number.isInteger(value.fitScore) || (value.fitScore as number) < 0 || (value.fitScore as number) > 10) {
+    return { ok: false, message: "The CV fit score must be a whole number from 0 to 10." };
+  }
+  if (typeof value.summary !== "string" || !value.summary.trim() || value.summary.length > 1200) {
+    return { ok: false, message: "The CV fit summary is invalid." };
+  }
+  const strengths = stringList(value.strengths, "CV fit strengths", 5, 300);
+  const gaps = stringList(value.gaps, "CV fit gaps", 5, 300);
+  if (!strengths.ok) return strengths;
+  if (!gaps.ok) return gaps;
+  return {
+    ok: true,
+    data: {
+      fitScore: value.fitScore as number,
+      summary: value.summary.trim(),
+      strengths: strengths.data,
+      gaps: gaps.data,
+    },
+  };
 }
 
 export function parseGeneratedCvContent(value: unknown): ParseResult<GeneratedCvContent> {

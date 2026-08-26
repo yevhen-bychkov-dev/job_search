@@ -52,7 +52,9 @@ export default async function JobDetailPage({ params, searchParams }: PageProps<
       {query.created === "1" ? <p className="alert alert-success" role="status">Job created.</p> : null}
       {query.updated === "1" ? <p className="alert alert-success" role="status">Job updated.</p> : null}
       {query.statusUpdated === "1" ? <p className="alert alert-success" role="status">Status updated.</p> : null}
+      {query.cvDeleted === "1" ? <p className="alert alert-success" role="status">Generated CV removed. Its version number remains reserved.</p> : null}
       {query.error === "delete" ? <p className="alert alert-error" role="alert">The job could not be deleted.</p> : null}
+      {query.error === "cv-delete" ? <p className="alert alert-error" role="alert">The generated CV could not be removed. Please try again.</p> : null}
       <header className="detail-header">
         <div><div className="detail-status"><StatusBadge status={job.status} /><span>Updated {formatDateInTimeZone(job.updatedAt)}</span></div><h1>{job.title}</h1><p>{job.company}</p></div>
         <div className="button-row"><Link className="button button-secondary" href={`/jobs/${id}/edit`}>Edit job</Link><form action={deleteAction}><ConfirmSubmitButton confirmation={`Delete ${job.title} at ${job.company}? This cannot be undone.`}>Delete</ConfirmSubmitButton></form></div>
@@ -62,7 +64,7 @@ export default async function JobDetailPage({ params, searchParams }: PageProps<
           <article className="card stack"><h2>Status</h2><StatusForm id={job.id} status={job.status} /></article>
           <article className="card stack"><h2>Description</h2><div className="rich-copy">{job.description || "No description saved."}</div></article>
           <article className="card stack"><h2>Private notes</h2><div className="rich-copy">{job.notes || "No notes saved."}</div></article>
-          <CvSection jobId={job.id} cvs={cvs} hasCandidateProfile={Boolean(candidateProfile)} hasResumeTemplate={Boolean(resumeTemplate)} latestGeneration={latestGeneration} jobRequirements={jobRequirements} />
+          <CvSection jobId={job.id} cvs={cvs} sourceUrl={sourceUrl} hasCandidateProfile={Boolean(candidateProfile)} hasResumeTemplate={Boolean(resumeTemplate)} latestGeneration={latestGeneration} jobRequirements={jobRequirements} />
           <article className="card stack"><h2>Status history</h2>{history.length ? <ol className="timeline">{history.map((event) => <li key={event.id}><span className="timeline-dot" /><div><strong>{event.fromStatus ? `${JOB_STATUS_LABELS[event.fromStatus]} → ${JOB_STATUS_LABELS[event.toStatus]}` : `Added as ${JOB_STATUS_LABELS[event.toStatus]}`}</strong><time dateTime={event.changedAt}>{formatDateTimeInTimeZone(event.changedAt)}</time></div></li>)}</ol> : <p className="muted">No recorded changes.</p>}</article>
         </div>
         <aside className="detail-aside stack">

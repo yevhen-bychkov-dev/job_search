@@ -2,8 +2,8 @@ import "server-only";
 
 import { isPlaywrightTestMode } from "@/lib/supabase/environment";
 
-import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput } from "./provider";
-import { CvAiProviderError, deterministicAnalysis, deterministicResume } from "./provider";
+import type { AnalyzeVacancyInput, AssessCvInput, CvAiProvider, GenerateCvInput } from "./provider";
+import { CvAiProviderError, deterministicAnalysis, deterministicCvAssessment, deterministicResume } from "./provider";
 import { isHighQualityCvModel } from "./gemini-request";
 import { GeminiCvProvider } from "./providers/gemini";
 
@@ -17,6 +17,10 @@ class SyntheticCvProvider implements CvAiProvider {
 
   async generateCv(input: GenerateCvInput): Promise<unknown> {
     return deterministicResume(input);
+  }
+
+  async assessCv(input: AssessCvInput): Promise<unknown> {
+    return deterministicCvAssessment(input);
   }
 }
 

@@ -1,11 +1,14 @@
 import Link from "next/link";
 
+import { ConfirmSubmitButton } from "@/components/ui/submit-button";
 import { formatDateTimeInTimeZone } from "@/features/jobs/domain";
 
 import type { GeneratedCv, JobResumeRequirements, ResumeGeneration } from "./types";
+import { deleteGeneratedCvAction } from "./actions";
+import { AssessCvForm } from "./assess-cv-form";
 import { JobRequirementsEditor } from "./job-requirements-editor";
 
-export function CvSection({ jobId, cvs, hasCandidateProfile, hasResumeTemplate, latestGeneration, jobRequirements }: { jobId: string; cvs: GeneratedCv[]; hasCandidateProfile: boolean; hasResumeTemplate: boolean; latestGeneration: ResumeGeneration | null; jobRequirements: JobResumeRequirements | null }) {
+export function CvSection({ jobId, cvs, sourceUrl, hasCandidateProfile, hasResumeTemplate, latestGeneration, jobRequirements }: { jobId: string; cvs: GeneratedCv[]; sourceUrl: string; hasCandidateProfile: boolean; hasResumeTemplate: boolean; latestGeneration: ResumeGeneration | null; jobRequirements: JobResumeRequirements | null }) {
   return (
     <article className="card stack" aria-labelledby="cvs-heading">
       <div className="section-heading">
@@ -21,9 +24,28 @@ export function CvSection({ jobId, cvs, hasCandidateProfile, hasResumeTemplate, 
       {latestGeneration?.status === "failed" ? <p className="alert alert-error" role="alert">{latestGeneration.generatedContent
         ? `PDF creation failed (${latestGeneration.errorCode ?? "unknown error"}). Generate again to finish this CV without another Gemini request.`
         : `Gemini did not produce CV content (${latestGeneration.errorCode ?? "unknown error"}). Generate again to make a new Gemini request.`}</p> : null}
+      <AssessCvForm jobId={jobId} cvs={cvs} hasSourceUrl={Boolean(sourceUrl)} />
       {cvs.length === 0
         ? <div className="cv-empty"><p>No CVs generated for this job yet.</p></div>
-        : <ol className="cv-list">{cvs.map((cv) => <li key={cv.id}><div><strong>CV #{cv.version}</strong><span>Generated {formatDateTimeInTimeZone(cv.createdAt)}</span></div><div className="file-actions"><a className="button button-secondary button-small" href={`/jobs/${jobId}/cvs/${cv.id}`} target="_blank" rel="noreferrer">Preview</a><a className="button button-secondary button-small" href={`/jobs/${jobId}/cvs/${cv.id}?download=1`}>Download</a></div></li>)}</ol>}
+        : <ol className="cv-list">{cvs.map((cv) => <li key={cv.id}>
+          <div className="cv-record stack">
+            <div className="cv-record-heading"><strong>CV #{cv.version}</strong><span>Generated {formatDateTimeInTimeZone(cv.createdAt)}</span></div>
+            {cv.assessment ? <section className="cv-fit-result" aria-label={`CV #${cv.version} fit assessment`}>
+              <div className="cv-fit-score"><strong>{cv.assessment.fitScore}/10</strong><span>CV fit</span></div>
+              <div className="stack">
+                <p>{cv.assessment.summary}</p>
+                {cv.assessment.strengths.length ? <div><h4>Strong matches</h4><ul>{cv.assessment.strengths.map((strength) => <li key={strength}>{strength}</li>)}</ul></div> : null}
+                {cv.assessment.gaps.length ? <div><h4>Gaps</h4><ul>{cv.assessment.gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul></div> : null}
+                <p className="cv-fit-meta">Assessed {formatDateTimeInTimeZone(cv.assessment.assessedAt)} · <a href={cv.assessment.sourceUrl} target="_blank" rel="noreferrer">source snapshot ↗</a></p>
+              </div>
+            </section> : null}
+          </div>
+          <div className="file-actions">
+            <a className="button button-secondary button-small" href={`/jobs/${jobId}/cvs/${cv.id}`} target="_blank" rel="noreferrer">Preview</a>
+            <a className="button button-secondary button-small" href={`/jobs/${jobId}/cvs/${cv.id}?download=1`}>Download</a>
+            <form action={deleteGeneratedCvAction.bind(null, jobId, cv.id)}><ConfirmSubmitButton confirmation={`Remove CV #${cv.version}? Its number will not be reused.`}>Remove</ConfirmSubmitButton></form>
+          </div>
+        </li>)}</ol>}
     </article>
   );
 }

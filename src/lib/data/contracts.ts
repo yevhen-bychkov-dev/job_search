@@ -1,5 +1,5 @@
 import type { FilterSettings } from "@/features/filters/types";
-import type { ApprovedResumeSkill, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeAiStage, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
+import type { ApprovedResumeSkill, CvFitAssessmentContent, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeAiStage, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
 import type { KnowledgeDocumentKind, KnowledgeFile } from "@/features/knowledge/types";
@@ -112,6 +112,7 @@ export interface AppStore {
   claimResumeGeneration(userId: string, id: string, input: { expectedUpdatedAt: string; status: "generating" | "rendering"; currentStage: ResumeAiStage; leaseExpiresAt: string; analysis?: VacancyAnalysis; approvedSkills?: ApprovedResumeSkill[]; templateVersion?: number }): Promise<ResumeGeneration | null>;
   updateResumeGeneration(userId: string, id: string, input: { status: ResumeGenerationStatus; analysis?: VacancyAnalysis | null; approvedSkills?: ApprovedResumeSkill[]; generatedContent?: GeneratedCvContent | null; currentStage?: ResumeAiStage | null; attemptCount?: number; nextRetryAt?: string | null; leaseExpiresAt?: string | null; errorCode?: string | null; templateVersion?: number | null; aiProvider?: string | null; aiModel?: string | null }): Promise<ResumeGeneration>;
   listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]>;
+  getGeneratedCv(userId: string, jobId: string, id: string): Promise<GeneratedCv | null>;
   createGeneratedCv(
     userId: string,
     jobId: string,
@@ -123,5 +124,12 @@ export interface AppStore {
     id: string,
     download: boolean,
   ): Promise<StoredCvDownload>;
+  saveGeneratedCvAssessment(
+    userId: string,
+    jobId: string,
+    id: string,
+    input: { assessment: CvFitAssessmentContent; sourceUrl: string; aiProvider: string; aiModel: string },
+  ): Promise<GeneratedCv>;
+  deleteGeneratedCv(userId: string, jobId: string, id: string): Promise<void>;
   resetForTests(): Promise<void>;
 }

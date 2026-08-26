@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildGeminiAnalysisRequest, buildGeminiResumeRequest, geminiThinkingLevelForStage, isHighQualityCvModel } from "../../src/features/cvs/ai/gemini-request.ts";
+import { buildGeminiAnalysisRequest, buildGeminiCvAssessmentRequest, buildGeminiResumeRequest, geminiThinkingLevelForStage, isHighQualityCvModel } from "../../src/features/cvs/ai/gemini-request.ts";
 import { fetchGeminiWithFallback, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
-import { CvAiProviderError, extractGeminiStructuredResponse, resumeContentJsonSchema, skillSuggestionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
-import { nextCvVersion, parseGeneratedCvContent, parseStoredGeneratedCvContent } from "../../src/features/cvs/domain.ts";
+import { cvFitAssessmentJsonSchema, CvAiProviderError, extractGeminiStructuredResponse, resumeContentJsonSchema, skillSuggestionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
+import { nextCvVersion, parseCvFitAssessment, parseGeneratedCvContent, parseStoredGeneratedCvContent } from "../../src/features/cvs/domain.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
 import type { VacancyAnalysis } from "../../src/features/cvs/types.ts";
 
@@ -57,6 +57,32 @@ test("Gemini requests use current JSON Schema structured outputs", () => {
   assert.match(JSON.stringify(resumeConfig.responseJsonSchema), /never only vacancy keywords/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /mustHaveTechnical/);
   assert.doesNotMatch(JSON.stringify(resumeRequest), /alex@example\.test|Alex Example|linkedin\.com/i);
+});
+
+test("CV assessment sends the selected CV and source snapshot through constrained JSON", () => {
+  const job = { title: "Frontend Engineer", company: "Synthetic Co", description: "React and TypeScript", technologies: ["React"], sourceUrl: "https://example.test/jobs/frontend" };
+  const cv = { headline: "Frontend Engineer", summary: "Verified summary.", skills: ["React"], selectedImpact: [], experience: [{ company: "Synthetic Labs", role: "Engineer", startDate: "2023", endDate: null, technologies: ["React"], achievements: ["Built accessible components."] }], education: [] };
+  const request = buildGeminiCvAssessmentRequest({ job, cv }, "gemini-3.5-flash-lite");
+  const config = request.generationConfig as Record<string, unknown>;
+  assert.deepEqual(config.responseJsonSchema, cvFitAssessmentJsonSchema());
+  assert.equal(config.responseMimeType, "application/json");
+  assert.equal(config.maxOutputTokens, 1_500);
+  assert.deepEqual(config.thinkingConfig, { thinkingLevel: "minimal" });
+  assert.match(JSON.stringify(request), /https:\/\/example\.test\/jobs\/frontend/);
+  assert.match(JSON.stringify(request), /Built accessible components/);
+  assert.match(JSON.stringify(request), /do not infer candidate facts/i);
+  assert.match(JSON.stringify(request), /do not.*browse/i);
+});
+
+test("CV fit assessment validation enforces a concise integer score and bounded evidence", () => {
+  const valid = parseCvFitAssessment({ fitScore: 8, summary: "Strong match with one material gap.", strengths: ["React experience"], gaps: ["GraphQL is not explicit"] });
+  if (!valid.ok) assert.fail(valid.message);
+  assert.equal(valid.data.fitScore, 8);
+  assert.equal(parseCvFitAssessment({ ...valid.data, fitScore: 8.5 }).ok, false);
+  assert.equal(parseCvFitAssessment({ ...valid.data, fitScore: 11 }).ok, false);
+  assert.equal(parseCvFitAssessment({ ...valid.data, extra: true }).ok, false);
+  assert.equal(parseCvFitAssessment({ ...valid.data, strengths: Array.from({ length: 6 }, (_, index) => `Match ${index}`) }).ok, false);
+  assert.equal(parseCvFitAssessment({ ...valid.data, gaps: ["Duplicate", "duplicate"] }).ok, false);
 });
 
 test("Gemini thinking is stage-specific and only emitted for known compatible models", () => {

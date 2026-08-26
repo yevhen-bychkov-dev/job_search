@@ -275,7 +275,7 @@ test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
   await expect(page.getByText("No files uploaded")).toBeVisible();
 });
 
-test("generate immutable CV versions from approved skills and prevent duplicate submissions", async ({ page }, testInfo) => {
+test("generate, assess, and remove stable CV versions from approved skills", async ({ page }, testInfo) => {
   test.slow();
   await signIn(page);
   await page.getByRole("link", { name: "Account", exact: true }).click();
@@ -328,6 +328,7 @@ test("generate immutable CV versions from approved skills and prevent duplicate 
   await page.getByRole("link", { name: "Add job" }).first().click();
   await page.getByLabel("Job title").fill("Accessible Frontend Engineer");
   await page.getByLabel("Company").fill("Synthetic Hiring Co");
+  await page.getByLabel("Source URL").fill("https://example.test/jobs/accessible-frontend-engineer");
   await page.getByLabel("Technologies").fill("React, TypeScript, GraphQL");
   await page.getByLabel("Description").fill("Build accessible React interfaces with TypeScript.");
   await page.getByRole("button", { name: "Create job" }).click();
@@ -351,13 +352,28 @@ test("generate immutable CV versions from approved skills and prevent duplicate 
   });
   await page.getByRole("button", { name: "Generate tailored resume", exact: true }).click();
   await expect(page.getByText("Resume #1 generated.")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".cv-list strong")).toHaveText(["CV #1"]);
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #1"]);
   expect(generationActionRequests).toBe(1);
   await page.getByRole("button", { name: "Generate tailored resume", exact: true }).dblclick();
   await expect(page.getByText("Resume #2 generated.")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".cv-list strong")).toHaveText(["CV #2", "CV #1"]);
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #2", "CV #1"]);
   expect(generationActionRequests).toBe(2);
   await page.unroute("**/*");
+
+  await page.getByLabel("Generated CV", { exact: true }).selectOption({ label: "CV #1" });
+  await page.getByRole("button", { name: "Assess CV fit", exact: true }).click();
+  await expect(page.getByText("CV #1 scored 10/10 for this vacancy.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel("CV #1 fit assessment")).toContainText("10/10");
+  await expect(page.getByLabel("CV #1 fit assessment")).toContainText("Strong matches");
+
+  const cv2Row = page.locator(".cv-list > li").filter({ hasText: "CV #2" });
+  page.once("dialog", (dialog) => dialog.accept());
+  await cv2Row.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(page.getByText("Generated CV removed. Its version number remains reserved.")).toBeVisible();
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #1"]);
+  await page.getByRole("button", { name: "Generate tailored resume", exact: true }).click();
+  await expect(page.getByText("Resume #3 generated.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #3", "CV #1"]);
   await expect(page.getByRole("link", { name: "Preview" })).toHaveCount(2);
   await expect(page.getByRole("link", { name: "Download" })).toHaveCount(2);
 
@@ -366,7 +382,7 @@ test("generate immutable CV versions from approved skills and prevent duplicate 
   for (let index = 0; index < 2; index += 1) {
     const previewHref = previewHrefs[index];
     const downloadHref = downloadHrefs[index];
-    if (!previewHref || !downloadHref) throw new Error(`Generated CV #${2 - index} links were not rendered.`);
+    if (!previewHref || !downloadHref) throw new Error(`Generated CV link ${index + 1} was not rendered.`);
     const preview = await page.request.get(previewHref);
     expect(preview.ok()).toBeTruthy();
     expect(preview.headers()["content-type"]).toContain("application/pdf");
@@ -378,7 +394,7 @@ test("generate immutable CV versions from approved skills and prevent duplicate 
     }
     const download = await page.request.get(downloadHref);
     expect(download.ok()).toBeTruthy();
-    expect(download.headers()["content-disposition"]).toContain(`attachment; filename*=UTF-8''cv-v${2 - index}.pdf`);
+    expect(download.headers()["content-disposition"]).toContain(`attachment; filename*=UTF-8''cv-v${index === 0 ? 3 : 1}.pdf`);
   }
 
   await page.context().clearCookies();

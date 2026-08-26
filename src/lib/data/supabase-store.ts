@@ -2,7 +2,7 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
-import { nextCvVersion, parseStoredGeneratedCvContent, parseVacancyAnalysis, recoverSavedJobRequirementsFromAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
+import { nextCvVersion, parseCvFitAssessment, parseStoredGeneratedCvContent, parseVacancyAnalysis, recoverSavedJobRequirementsFromAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
 import type { ApprovedResumeSkill, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
@@ -30,6 +30,7 @@ type JobRow = Awaited<ReturnType<typeof getJobRows>>[number];
 
 const RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,generation_json,current_stage,attempt_count,next_retry_at,lease_expires_at,error_code,template_version,ai_provider,ai_model,created_at,updated_at";
 const LEGACY_RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,generation_json,current_stage,attempt_count,next_retry_at,error_code,template_version,created_at,updated_at";
+const GENERATED_CV_SELECT = "id,job_id,version,file_path,content_json,ai_provider,ai_model,generation_id,template_version,assessment_json,assessment_provider,assessment_model,assessed_source_url,assessed_at,deleted_at,created_at";
 const ACTIVE_GENERATION_STATUSES: ResumeGenerationStatus[] = ["analyzing", "awaiting_confirmation", "strategizing", "generating", "critiquing", "correcting", "rendering", "retrying"];
 
 function isMissingResumeReliabilityColumn(error: { code?: string; message?: string } | null): boolean {
@@ -110,10 +111,20 @@ function toGeneratedCv(row: {
   ai_model: string;
   generation_id: string | null;
   template_version: number | null;
+  assessment_json: Json | null;
+  assessment_provider: string | null;
+  assessment_model: string | null;
+  assessed_source_url: string | null;
+  assessed_at: string | null;
   created_at: string;
 }): GeneratedCv {
   const content = parseStoredGeneratedCvContent(row.content_json);
   if (!content.ok) throw new DataConsistencyError(content.message);
+  const parsedAssessment = row.assessment_json === null ? null : parseCvFitAssessment(row.assessment_json);
+  if (parsedAssessment && !parsedAssessment.ok) throw new DataConsistencyError(parsedAssessment.message);
+  if (parsedAssessment && (!row.assessment_provider || !row.assessment_model || !row.assessed_source_url || !row.assessed_at)) {
+    throw new DataConsistencyError("Stored CV fit assessment metadata is incomplete.");
+  }
   return {
     id: row.id,
     jobId: row.job_id,
@@ -123,6 +134,13 @@ function toGeneratedCv(row: {
     aiModel: row.ai_model,
     generationId: row.generation_id,
     templateVersion: row.template_version,
+    assessment: parsedAssessment ? {
+      ...parsedAssessment.data,
+      sourceUrl: row.assessed_source_url as string,
+      aiProvider: row.assessment_provider as string,
+      aiModel: row.assessment_model as string,
+      assessedAt: row.assessed_at as string,
+    } : null,
     createdAt: row.created_at,
   };
 }
@@ -730,9 +748,10 @@ export class SupabaseAppStore implements AppStore {
     const supabase = await createServerSupabaseClient();
     const { data, error } = await supabase
       .from("generated_cvs")
-      .select("id,job_id,version,content_json,ai_provider,ai_model,generation_id,template_version,created_at")
+      .select(GENERATED_CV_SELECT)
       .eq("user_id", userId)
       .eq("job_id", jobId)
+      .is("deleted_at", null)
       .order("version", { ascending: false });
     if (error) throw new Error(`Unable to load generated CVs: ${error.message}`);
     const cvs: GeneratedCv[] = [];
@@ -745,6 +764,20 @@ export class SupabaseAppStore implements AppStore {
       }
     }
     return cvs;
+  }
+
+  async getGeneratedCv(userId: string, jobId: string, id: string): Promise<GeneratedCv | null> {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from("generated_cvs")
+      .select(GENERATED_CV_SELECT)
+      .eq("user_id", userId)
+      .eq("job_id", jobId)
+      .eq("id", id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw new Error(`Unable to load generated CV: ${error.message}`);
+    return data ? toGeneratedCv(data) : null;
   }
 
   async createGeneratedCv(
@@ -798,13 +831,13 @@ export class SupabaseAppStore implements AppStore {
           generation_id: input.generationId ?? null,
           template_version: input.templateVersion ?? null,
         })
-        .select("id,job_id,version,content_json,ai_provider,ai_model,generation_id,template_version,created_at")
+        .select(GENERATED_CV_SELECT)
         .single();
       if (!created.error) return toGeneratedCv(created.data);
       if (created.error.code !== "23505") return cleanupUpload(`Unable to record generated CV: ${created.error.message}`);
       const committed = await supabase
         .from("generated_cvs")
-        .select("id,job_id,version,content_json,ai_provider,ai_model,generation_id,template_version,created_at")
+        .select(GENERATED_CV_SELECT)
         .eq("user_id", userId)
         .eq("job_id", jobId)
         .eq("id", id)
@@ -817,7 +850,7 @@ export class SupabaseAppStore implements AppStore {
       if (input.generationId) {
         const generationCommitted = await supabase
           .from("generated_cvs")
-          .select("id,job_id,version,content_json,ai_provider,ai_model,generation_id,template_version,created_at")
+          .select(GENERATED_CV_SELECT)
           .eq("user_id", userId)
           .eq("job_id", jobId)
           .eq("generation_id", input.generationId)
@@ -845,6 +878,7 @@ export class SupabaseAppStore implements AppStore {
       .eq("user_id", userId)
       .eq("job_id", jobId)
       .eq("id", id)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(`Unable to load generated CV: ${error.message}`);
     if (!data) throw new ResourceNotFoundError("CV");
@@ -853,6 +887,62 @@ export class SupabaseAppStore implements AppStore {
       : await supabase.storage.from("generated-cvs").createSignedUrl(data.file_path, 60);
     if (signed.error) throw new Error(`Unable to open generated CV: ${signed.error.message}`);
     return { kind: "redirect" as const, url: signed.data.signedUrl };
+  }
+
+  async saveGeneratedCvAssessment(
+    userId: string,
+    jobId: string,
+    id: string,
+    input: Parameters<AppStore["saveGeneratedCvAssessment"]>[3],
+  ): Promise<GeneratedCv> {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from("generated_cvs")
+      .update({
+        assessment_json: input.assessment as unknown as Json,
+        assessment_provider: input.aiProvider,
+        assessment_model: input.aiModel,
+        assessed_source_url: input.sourceUrl,
+        assessed_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId)
+      .eq("job_id", jobId)
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select(GENERATED_CV_SELECT)
+      .maybeSingle();
+    if (error) throw new Error(`Unable to save the CV fit assessment: ${error.message}`);
+    if (!data) throw new ResourceNotFoundError("CV");
+    return toGeneratedCv(data);
+  }
+
+  async deleteGeneratedCv(userId: string, jobId: string, id: string): Promise<void> {
+    const supabase = await createServerSupabaseClient();
+    const deletedAt = new Date().toISOString();
+    const marked = await supabase
+      .from("generated_cvs")
+      .update({ deleted_at: deletedAt })
+      .eq("user_id", userId)
+      .eq("job_id", jobId)
+      .eq("id", id)
+      .is("deleted_at", null)
+      .select("file_path")
+      .maybeSingle();
+    if (marked.error) throw new Error(`Unable to mark the generated CV as removed: ${marked.error.message}`);
+    if (!marked.data) throw new ResourceNotFoundError("CV");
+
+    const removed = await supabase.storage.from("generated-cvs").remove([marked.data.file_path]);
+    if (!removed.error) return;
+
+    const restored = await supabase
+      .from("generated_cvs")
+      .update({ deleted_at: null })
+      .eq("user_id", userId)
+      .eq("job_id", jobId)
+      .eq("id", id)
+      .eq("deleted_at", deletedAt);
+    if (restored.error) reportUnexpectedError("cvs.delete.compensation", restored.error);
+    throw new ArtifactPersistenceError("cleanup", "The generated CV file could not be removed.", { cause: removed.error });
   }
 
   async resetForTests(): Promise<void> {

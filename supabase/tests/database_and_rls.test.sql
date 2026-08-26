@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(105);
+select plan(111);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -83,10 +83,40 @@ select lives_ok(
   'user B can create an immutable CV version for an owned job'
 );
 select is((select count(*) from public.generated_cvs), 1::bigint, 'user B can read the owned CV version');
+select lives_ok(
+  $$update public.generated_cvs
+    set assessment_json = '{"fitScore":8,"summary":"Strong synthetic fit.","strengths":["React"],"gaps":["GraphQL"]}'::jsonb,
+        assessment_provider = 'gemini',
+        assessment_model = 'gemini-test',
+        assessed_source_url = 'https://example.test/jobs/backend',
+        assessed_at = now()
+    where id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'$$,
+  'user B can store an assessment on an owned CV'
+);
 select is(
-  (with changed as (update public.generated_cvs set ai_model = 'changed' returning *) select count(*) from changed),
-  0::bigint,
-  'generated CV versions cannot be updated directly'
+  (select (assessment_json ->> 'fitScore')::integer from public.generated_cvs where id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
+  8,
+  'the structured CV fit score persists'
+);
+select throws_ok(
+  $$update public.generated_cvs
+    set assessment_json = '{"fitScore":11,"summary":"Invalid score.","strengths":[],"gaps":[]}'::jsonb
+    where id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'$$,
+  '23514',
+  null,
+  'database constraints reject a CV fit score outside 0 through 10'
+);
+select throws_ok(
+  $$update public.generated_cvs set ai_model = 'changed' where id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'$$,
+  '23514',
+  null,
+  'generated CV provenance and version fields remain immutable'
+);
+select throws_ok(
+  $$update public.generated_cvs set user_id = '11111111-1111-4111-8111-111111111111' where id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'$$,
+  '23514',
+  null,
+  'generated CV ownership cannot be reassigned through the mutable metadata policy'
 );
 select throws_ok(
   $$insert into public.generated_cvs (user_id, job_id, version, file_path, content_json, ai_provider, ai_model)
@@ -140,6 +170,16 @@ select is((with changed as (update public.generated_cvs set ai_model = 'stolen' 
 select is((with removed as (delete from public.generated_cvs returning *) select count(*) from removed), 0::bigint, 'user A cannot delete user B CV versions');
 
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
+select is(
+  (with changed as (update public.generated_cvs set deleted_at = now() where id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' returning *) select count(*) from changed),
+  1::bigint,
+  'user B can soft-delete an owned CV'
+);
+select is(
+  (select max(version) from public.generated_cvs where job_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'),
+  1,
+  'soft-deleted metadata keeps its version reserved'
+);
 select is((with removed as (delete from public.jobs where user_id = '22222222-2222-4222-8222-222222222222' returning *) select count(*) from removed), 1::bigint, 'user B can delete an owned job');
 select is((select count(*) from public.generated_cvs), 0::bigint, 'deleting an owned job cascades its CV metadata');
 
@@ -235,7 +275,7 @@ select like(
 );
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'job_status_history' and cmd <> 'SELECT'), 0::bigint, 'status history cannot be directly mutated through RLS');
 select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'generated_cv_objects_%'), 3::bigint, 'generated CV Storage has select, insert, and compensation delete policies');
-select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'generated_cvs' and cmd = 'UPDATE'), 0::bigint, 'generated CV metadata has no update policy');
+select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'generated_cvs' and cmd = 'UPDATE'), 1::bigint, 'generated CV mutable metadata has one owner-and-parent update policy');
 select like(
   (select qual from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'generated_cv_objects_select_own'),
   '%owner_id%auth.uid%',

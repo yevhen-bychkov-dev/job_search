@@ -1,6 +1,7 @@
 import "server-only";
 
 import { candidateProfileForAi } from "@/features/knowledge/candidate-profile";
+import { normalizeSourceUrl } from "@/features/jobs/domain";
 import { ArtifactPersistenceError, DatabaseMigrationRequiredError, ResourceNotFoundError } from "@/lib/data/contracts";
 import { getAppStore } from "@/lib/data/server-store";
 import { reportUnexpectedError } from "@/lib/server-errors";
@@ -12,6 +13,7 @@ import {
   approvedSkillSnapshotsEqual,
   materializeResumeContent,
   materializeVacancyAnalysis,
+  parseCvFitAssessment,
   parseVacancyAnalysis,
   savedJobRequirementsFromAnalysis,
   savedJobRequirementsToAnalysis,
@@ -35,6 +37,10 @@ export class ResumeGenerationError extends Error {
   readonly code: string;
   readonly stage: ResumeAiStage;
   constructor(code: string, message: string, stage: ResumeAiStage, options?: ErrorOptions) { super(message, options); this.name = "ResumeGenerationError"; this.code = code; this.stage = stage; }
+}
+export class CvAssessmentError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string, options?: ErrorOptions) { super(message, options); this.name = "CvAssessmentError"; this.code = code; }
 }
 
 export type BeginResumeGenerationResult =
@@ -84,7 +90,7 @@ function geminiMessage(error: CvAiProviderError): string {
   if (error.code === "GEMINI_HTTP_400") return "Gemini rejected the structured-output request (GEMINI_HTTP_400). This error is not retryable; verify the deployed application version and Gemini model configuration.";
   if (/^GEMINI_HTTP_5\d\d$/.test(error.code)) return `Gemini is temporarily unavailable after one bounded retry (${error.code}). Retry this stage later.`;
   if (error.code === "GEMINI_NETWORK_FAILURE") return "The Gemini request did not complete (GEMINI_NETWORK_FAILURE). No automatic retry was made because Gemini did not return a retryable HTTP response.";
-  if (error.code === "GEMINI_TRUNCATED_RESPONSE") return "Gemini stopped before completing the structured resume. Retry content generation.";
+  if (error.code === "GEMINI_TRUNCATED_RESPONSE") return "Gemini stopped before completing the structured response. Retry the request.";
   return `Gemini could not produce valid structured output (${error.code}).`;
 }
 
@@ -169,6 +175,46 @@ export async function saveJobRequirements(userId: string, jobId: string, rawAnal
     requirements: parsed.data,
     approvedAt,
   });
+}
+
+export async function assessGeneratedCv(userId: string, jobId: string, cvId: string): Promise<GeneratedCv> {
+  const store = getAppStore();
+  const [job, cv] = await Promise.all([
+    store.getJob(userId, jobId),
+    store.getGeneratedCv(userId, jobId, cvId),
+  ]);
+  if (!job) throw new ResourceNotFoundError("Job");
+  if (!cv) throw new ResourceNotFoundError("CV");
+  const sourceUrl = normalizeSourceUrl(job.sourceUrl);
+  if (!sourceUrl) throw new CvAssessmentError("SOURCE_URL_MISSING", "Add a valid source URL to this vacancy before assessing CV fit.");
+
+  try {
+    const provider = createCvAiProvider();
+    const raw = await provider.assessCv({
+      job: { ...jobPayload(job), sourceUrl },
+      cv: cv.content,
+    }, { jobId, stage: "assessment" });
+    const parsed = parseCvFitAssessment(raw);
+    if (!parsed.ok) throw new CvAssessmentError("CV_ASSESSMENT_REJECTED", `The structured assessment was rejected: ${parsed.message}`);
+    return store.saveGeneratedCvAssessment(userId, jobId, cvId, {
+      assessment: parsed.data,
+      sourceUrl,
+      aiProvider: provider.providerId,
+      aiModel: provider.model,
+    });
+  } catch (error) {
+    if (error instanceof CvAssessmentError || error instanceof ResourceNotFoundError) throw error;
+    if (error instanceof CvAiProviderError) {
+      reportUnexpectedError("cvs.assessment.gemini", error);
+      throw new CvAssessmentError(error.code, geminiMessage(error), { cause: error });
+    }
+    reportUnexpectedError("cvs.assessment", error);
+    throw new CvAssessmentError("CV_ASSESSMENT_FAILED", "The CV fit assessment could not be saved. Please try again.", { cause: error });
+  }
+}
+
+export async function removeGeneratedCv(userId: string, jobId: string, cvId: string): Promise<void> {
+  await getAppStore().deleteGeneratedCv(userId, jobId, cvId);
 }
 
 export async function beginResumeGeneration(userId: string, jobId: string, idempotencyKey: string): Promise<BeginResumeGenerationResult> {

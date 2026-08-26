@@ -1,14 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { requireIdentity } from "@/features/auth/session";
 import { ResourceNotFoundError } from "@/lib/data/contracts";
 import { reportUnexpectedError } from "@/lib/server-errors";
 import { isUuid } from "@/lib/validation";
 
-import { analyzeJobRequirements, beginResumeGeneration, MissingCandidateProfileError, MissingJobRequirementsError, MissingResumeTemplateError, renderResumeGeneration, ResumeGenerationError, saveJobRequirements } from "./service";
-import type { CvActionState, RequirementsActionState } from "./types";
+import { analyzeJobRequirements, assessGeneratedCv, beginResumeGeneration, CvAssessmentError, MissingCandidateProfileError, MissingJobRequirementsError, MissingResumeTemplateError, removeGeneratedCv, renderResumeGeneration, ResumeGenerationError, saveJobRequirements } from "./service";
+import type { CvActionState, CvAssessmentActionState, RequirementsActionState } from "./types";
 
 function failure(operation: string, error: unknown): CvActionState {
   if (error instanceof MissingCandidateProfileError || error instanceof MissingJobRequirementsError || error instanceof MissingResumeTemplateError || error instanceof ResumeGenerationError) return { status: "error", message: error.message };
@@ -79,4 +80,34 @@ export async function generateCvAction(jobId: string, _previous: CvActionState, 
     revalidatePath(`/jobs/${jobId}`);
     return failure("cvs.generate", error);
   }
+}
+
+export async function assessCvAction(jobId: string, _previous: CvAssessmentActionState, formData: FormData): Promise<CvAssessmentActionState> {
+  void _previous;
+  const identity = await requireIdentity();
+  const cvId = formData.get("cvId");
+  if (!isUuid(jobId) || typeof cvId !== "string" || !isUuid(cvId)) return { status: "error", message: "Choose a valid generated CV." };
+  try {
+    const cv = await assessGeneratedCv(identity.userId, jobId, cvId);
+    revalidatePath(`/jobs/${jobId}`);
+    return { status: "success", message: `CV #${cv.version} scored ${cv.assessment?.fitScore ?? 0}/10 for this vacancy.`, cvId };
+  } catch (error) {
+    if (error instanceof CvAssessmentError) return { status: "error", message: error.message, cvId };
+    if (error instanceof ResourceNotFoundError) return { status: "error", message: "The vacancy or selected CV is no longer available.", cvId };
+    reportUnexpectedError("cvs.assessment.action", error);
+    return { status: "error", message: "The CV fit assessment could not be completed. Please try again.", cvId };
+  }
+}
+
+export async function deleteGeneratedCvAction(jobId: string, cvId: string): Promise<void> {
+  const identity = await requireIdentity();
+  if (!isUuid(jobId) || !isUuid(cvId)) redirect("/jobs?error=invalid-id");
+  try {
+    await removeGeneratedCv(identity.userId, jobId, cvId);
+  } catch (error) {
+    if (!(error instanceof ResourceNotFoundError)) reportUnexpectedError("cvs.delete", error);
+    redirect(`/jobs/${jobId}?error=cv-delete`);
+  }
+  revalidatePath(`/jobs/${jobId}`);
+  redirect(`/jobs/${jobId}?cvDeleted=1`);
 }

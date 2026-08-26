@@ -27,6 +27,7 @@ type StoredKnowledgeFile = KnowledgeFile & {
 type StoredGeneratedCv = GeneratedCv & {
   userId: string;
   bytes: Uint8Array;
+  deletedAt: string | null;
 };
 
 type StoredTemplate = ResumeTemplate & { userId: string; mimeType: string; bytes: Uint8Array };
@@ -118,6 +119,7 @@ function publicGeneratedCv(record: StoredGeneratedCv): GeneratedCv {
     aiModel: record.aiModel,
     generationId: record.generationId,
     templateVersion: record.templateVersion,
+    assessment: structuredClone(record.assessment),
     createdAt: record.createdAt,
   };
 }
@@ -477,9 +479,16 @@ export class MemoryAppStore implements AppStore {
 
   async listGeneratedCvs(userId: string, jobId: string): Promise<GeneratedCv[]> {
     return state().generatedCvs
-      .filter((cv) => cv.userId === userId && cv.jobId === jobId)
+      .filter((cv) => cv.userId === userId && cv.jobId === jobId && cv.deletedAt === null)
       .sort((left, right) => right.version - left.version)
       .map(publicGeneratedCv);
+  }
+
+  async getGeneratedCv(userId: string, jobId: string, id: string): Promise<GeneratedCv | null> {
+    const cv = state().generatedCvs.find((candidate) =>
+      candidate.userId === userId && candidate.jobId === jobId && candidate.id === id && candidate.deletedAt === null
+    );
+    return cv ? publicGeneratedCv(cv) : null;
   }
 
   async createGeneratedCv(
@@ -507,8 +516,10 @@ export class MemoryAppStore implements AppStore {
       aiModel: input.aiModel,
       generationId: input.generationId ?? null,
       templateVersion: input.templateVersion ?? null,
+      assessment: null,
       createdAt: new Date().toISOString(),
       bytes: input.bytes,
+      deletedAt: null,
     };
     state().generatedCvs.push(stored);
     return publicGeneratedCv(stored);
@@ -522,7 +533,7 @@ export class MemoryAppStore implements AppStore {
   ) {
     void _download;
     const cv = state().generatedCvs.find((candidate) =>
-      candidate.userId === userId && candidate.jobId === jobId && candidate.id === id
+      candidate.userId === userId && candidate.jobId === jobId && candidate.id === id && candidate.deletedAt === null
     );
     if (!cv) throw new ResourceNotFoundError("CV");
     return {
@@ -531,6 +542,35 @@ export class MemoryAppStore implements AppStore {
       mimeType: "application/pdf",
       filename: `cv-v${cv.version}.pdf`,
     };
+  }
+
+  async saveGeneratedCvAssessment(
+    userId: string,
+    jobId: string,
+    id: string,
+    input: Parameters<AppStore["saveGeneratedCvAssessment"]>[3],
+  ): Promise<GeneratedCv> {
+    const cv = state().generatedCvs.find((candidate) =>
+      candidate.userId === userId && candidate.jobId === jobId && candidate.id === id && candidate.deletedAt === null
+    );
+    if (!cv) throw new ResourceNotFoundError("CV");
+    cv.assessment = {
+      ...structuredClone(input.assessment),
+      sourceUrl: input.sourceUrl,
+      aiProvider: input.aiProvider,
+      aiModel: input.aiModel,
+      assessedAt: new Date().toISOString(),
+    };
+    return publicGeneratedCv(cv);
+  }
+
+  async deleteGeneratedCv(userId: string, jobId: string, id: string): Promise<void> {
+    const cv = state().generatedCvs.find((candidate) =>
+      candidate.userId === userId && candidate.jobId === jobId && candidate.id === id && candidate.deletedAt === null
+    );
+    if (!cv) throw new ResourceNotFoundError("CV");
+    cv.deletedAt = new Date().toISOString();
+    cv.bytes = new Uint8Array();
   }
 
   async resetForTests(): Promise<void> {

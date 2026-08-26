@@ -11,10 +11,16 @@ export type Database = {
     Tables: {
       generated_cvs: {
         Row: {
+          assessed_at: string | null;
+          assessed_source_url: string | null;
+          assessment_json: Json | null;
+          assessment_model: string | null;
+          assessment_provider: string | null;
           ai_model: string;
           ai_provider: string;
           content_json: Json;
           created_at: string;
+          deleted_at: string | null;
           file_path: string;
           generation_id: string | null;
           id: string;
@@ -24,10 +30,16 @@ export type Database = {
           version: number;
         };
         Insert: {
+          assessed_at?: string | null;
+          assessed_source_url?: string | null;
+          assessment_json?: Json | null;
+          assessment_model?: string | null;
+          assessment_provider?: string | null;
           ai_model: string;
           ai_provider: string;
           content_json: Json;
           created_at?: string;
+          deleted_at?: string | null;
           file_path: string;
           generation_id?: string | null;
           id?: string;
@@ -37,10 +49,16 @@ export type Database = {
           version: number;
         };
         Update: {
+          assessed_at?: string | null;
+          assessed_source_url?: string | null;
+          assessment_json?: Json | null;
+          assessment_model?: string | null;
+          assessment_provider?: string | null;
           ai_model?: string;
           ai_provider?: string;
           content_json?: Json;
           created_at?: string;
+          deleted_at?: string | null;
           file_path?: string;
           generation_id?: string | null;
           id?: string;

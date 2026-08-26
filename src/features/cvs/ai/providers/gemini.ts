@@ -1,8 +1,8 @@
 import "server-only";
 
-import type { AnalyzeVacancyInput, CvAiProvider, GenerateCvInput, ResumeAiContext } from "../provider.ts";
+import type { AnalyzeVacancyInput, AssessCvInput, CvAiProvider, GenerateCvInput, ResumeAiContext } from "../provider.ts";
 import { CvAiProviderError, extractGeminiStructuredResponse } from "../provider.ts";
-import { buildGeminiAnalysisRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
+import { buildGeminiAnalysisRequest, buildGeminiCvAssessmentRequest, buildGeminiResumeRequest } from "../gemini-request.ts";
 import { fetchGeminiWithFallback } from "../gemini-retry.ts";
 
 function tokenUsage(payload: unknown): Record<string, number | null> {
@@ -108,5 +108,9 @@ export class GeminiCvProvider implements CvAiProvider {
 
   async generateCv(input: GenerateCvInput, context?: ResumeAiContext): Promise<unknown> {
     return this.request(this.primaryModel, (model) => buildGeminiResumeRequest(input, model), context);
+  }
+
+  async assessCv(input: AssessCvInput, context?: ResumeAiContext): Promise<unknown> {
+    return this.request(this.analysisModel, (model) => buildGeminiCvAssessmentRequest(input, model), context);
   }
 }

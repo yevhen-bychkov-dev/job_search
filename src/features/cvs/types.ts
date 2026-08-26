@@ -19,6 +19,20 @@ export type GeneratedCvContent = {
   }>;
 };
 
+export type CvFitAssessmentContent = {
+  fitScore: number;
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+};
+
+export type CvFitAssessment = CvFitAssessmentContent & {
+  sourceUrl: string;
+  aiProvider: string;
+  aiModel: string;
+  assessedAt: string;
+};
+
 export type ResumeAiStage = "generation" | "render";
 
 export type GeneratedCv = {
@@ -30,6 +44,7 @@ export type GeneratedCv = {
   aiModel: string;
   generationId: string | null;
   templateVersion: number | null;
+  assessment: CvFitAssessment | null;
   createdAt: string;
 };
 
@@ -144,6 +159,12 @@ export type CvActionState = {
   stage?: ResumeAiStage;
 };
 
+export type CvAssessmentActionState = {
+  status: "idle" | "success" | "error";
+  message: string;
+  cvId?: string;
+};
+
 export type RequirementsActionState = {
   status: "idle" | "success" | "error";
   message: string;
@@ -153,4 +174,5 @@ export type RequirementsActionState = {
 };
 
 export const INITIAL_CV_ACTION_STATE: CvActionState = { status: "idle", message: "" };
+export const INITIAL_CV_ASSESSMENT_ACTION_STATE: CvAssessmentActionState = { status: "idle", message: "" };
 export const INITIAL_REQUIREMENTS_ACTION_STATE: RequirementsActionState = { status: "idle", message: "" };

@@ -1,6 +1,6 @@
 import type { CandidateProfileForAi } from "@/features/knowledge/candidate-profile";
 
-import type { ApprovedResumeSkill, VacancyAnalysis } from "../types";
+import type { ApprovedResumeSkill, GeneratedCvContent, VacancyAnalysis } from "../types";
 
 export type VacancyAiJob = {
   title: string;
@@ -20,10 +20,15 @@ export type GenerateCvInput = {
   approvedSkills: ApprovedResumeSkill[];
 };
 
+export type AssessCvInput = {
+  job: VacancyAiJob & { sourceUrl: string };
+  cv: GeneratedCvContent;
+};
+
 export type ResumeAiContext = {
   generationId?: string;
   jobId?: string;
-  stage: "analysis" | "generation";
+  stage: "analysis" | "generation" | "assessment";
 };
 
 export interface CvAiProvider {
@@ -31,6 +36,7 @@ export interface CvAiProvider {
   readonly model: string;
   analyzeVacancy(input: AnalyzeVacancyInput, context?: ResumeAiContext): Promise<unknown>;
   generateCv(input: GenerateCvInput, context?: ResumeAiContext): Promise<unknown>;
+  assessCv(input: AssessCvInput, context?: ResumeAiContext): Promise<unknown>;
 }
 
 export class CvAiProviderError extends Error {
@@ -138,6 +144,25 @@ export function resumeContentJsonSchema(): Record<string, unknown> {
   };
 }
 
+export function cvFitAssessmentJsonSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["fitScore", "summary", "strengths", "gaps"],
+    properties: {
+      fitScore: {
+        type: "integer",
+        minimum: 0,
+        maximum: 10,
+        description: "Overall demonstrated fit of this exact CV to this vacancy, from 0 (no fit) through 10 (exceptional fit).",
+      },
+      summary: { type: "string", description: "A concise explanation of the score grounded only in the supplied CV and vacancy." },
+      strengths: { type: "array", items: { type: "string" }, description: "Up to five strongest demonstrated matches." },
+      gaps: { type: "array", items: { type: "string" }, description: "Up to five important vacancy requirements that are absent or weakly evidenced in this CV." },
+    },
+  };
+}
+
 export function deterministicAnalysis(input: AnalyzeVacancyInput): Record<string, unknown> {
   return {
     skills: input.job.technologies.map((technology) => ({ label: technology, category: "technical", importance: "must_have" })),
@@ -163,6 +188,21 @@ export function deterministicResume(input: GenerateCvInput): Record<string, unkn
       bullets: experience.achievements.map((achievement) => ({ text: achievement.text, sourceAchievementIds: [achievement.id] })),
     })),
     educationIds: input.candidate.education.map((education) => education.id),
+  };
+}
+
+export function deterministicCvAssessment(input: AssessCvInput): Record<string, unknown> {
+  const normalized = (value: string) => value.trim().toLocaleLowerCase("en");
+  const cvSkills = new Set(input.cv.skills.map(normalized));
+  const requirements = input.job.technologies.filter(Boolean);
+  const matched = requirements.filter((technology) => cvSkills.has(normalized(technology)));
+  const missing = requirements.filter((technology) => !cvSkills.has(normalized(technology)));
+  const fitScore = requirements.length === 0 ? 5 : Math.round((matched.length / requirements.length) * 10);
+  return {
+    fitScore,
+    summary: `This CV demonstrates ${matched.length} of ${requirements.length} explicit technology matches for the saved vacancy.`,
+    strengths: matched.slice(0, 5).map((technology) => `Demonstrates ${technology}.`),
+    gaps: missing.slice(0, 5).map((technology) => `${technology} is not explicit in this CV.`),
   };
 }
 
