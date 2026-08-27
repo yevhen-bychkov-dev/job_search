@@ -2,7 +2,7 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
-import { nextCvVersion } from "@/features/cvs/domain";
+import { generatedCvFilename, nextCvVersion } from "@/features/cvs/domain";
 import type { GeneratedCv, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
@@ -69,6 +69,7 @@ function createJobRecord(userId: string, input: JobInput): Job & { userId: strin
     externalJobId: input.externalJobId ?? "",
     userId,
     duplicateKey: jobDuplicateKey(input),
+    archivedAt: "",
     createdAt: now,
     updatedAt: now,
   };
@@ -93,6 +94,7 @@ function publicJob(record: Job & { userId: string; duplicateKey: string }): Job 
     notes: record.notes,
     discoveredOn: record.discoveredOn,
     appliedOn: record.appliedOn,
+    archivedAt: record.archivedAt,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -138,6 +140,7 @@ export class MemoryAppStore implements AppStore {
   async listJobs(userId: string, query: JobQuery = {}): Promise<Job[]> {
     return state()
       .jobs.filter((job) => job.userId === userId)
+      .filter((job) => query.archive === "all" || (query.archive === "archived" ? Boolean(job.archivedAt) : !job.archivedAt))
       .filter((job) => !query.status || job.status === query.status)
       .filter((job) => !query.workMode || job.workMode === query.workMode)
       .filter((job) => matchesJobQuery(job, query.search ?? ""))
@@ -296,6 +299,29 @@ export class MemoryAppStore implements AppStore {
       ).toISOString();
     }
     return publicJob(current);
+  }
+
+  async updateJobsStatus(
+    userId: string,
+    ids: string[],
+    status: JobStatus,
+    appliedOn: string,
+  ): Promise<number> {
+    const selected = state().jobs.filter((job) => job.userId === userId && ids.includes(job.id));
+    if (selected.length !== ids.length) throw new ResourceNotFoundError("One or more jobs");
+    for (const job of selected) await this.updateJobStatus(userId, job.id, status, appliedOn);
+    return selected.length;
+  }
+
+  async setJobsArchived(userId: string, ids: string[], archived: boolean): Promise<number> {
+    const selected = state().jobs.filter((job) => job.userId === userId && ids.includes(job.id));
+    if (selected.length !== ids.length) throw new ResourceNotFoundError("One or more jobs");
+    const timestamp = archived ? new Date().toISOString() : "";
+    for (const job of selected) {
+      job.archivedAt = timestamp;
+      job.updatedAt = new Date(Math.max(Date.now(), new Date(job.updatedAt).getTime() + 1)).toISOString();
+    }
+    return selected.length;
   }
 
   async deleteJob(userId: string, id: string): Promise<void> {
@@ -536,11 +562,14 @@ export class MemoryAppStore implements AppStore {
       candidate.userId === userId && candidate.jobId === jobId && candidate.id === id && candidate.deletedAt === null
     );
     if (!cv) throw new ResourceNotFoundError("CV");
+    const job = state().jobs.find((candidate) => candidate.userId === userId && candidate.id === jobId);
+    if (!job) throw new ResourceNotFoundError("Job");
+    const profile = await this.getCandidateProfile(userId);
     return {
       kind: "content" as const,
       bytes: cv.bytes,
       mimeType: "application/pdf",
-      filename: `cv-v${cv.version}.pdf`,
+      filename: generatedCvFilename(profile?.personal.name ?? "Candidate", job.company),
     };
   }
 

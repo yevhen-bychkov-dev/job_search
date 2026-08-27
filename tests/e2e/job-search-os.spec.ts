@@ -42,6 +42,7 @@ test("authentication, protected routes, navigation, and logout", async ({ page }
 
   for (const [name, path, heading] of [
     ["Dashboard", "/dashboard", "Dashboard"],
+    ["Archived", "/archived", "Archived jobs"],
     ["Board", "/board", "Board"],
     ["Filters", "/filters", "Filters"],
     ["Knowledge Base", "/knowledge-base", "Knowledge Base"],
@@ -56,6 +57,40 @@ test("authentication, protected routes, navigation, and logout", async ({ page }
   await page.getByRole("button", { name: "Sign out" }).last().click();
   await expect(page).toHaveURL(/\/login\?signedOut=1$/);
   await expect(page.getByText("You have been signed out.")).toBeVisible();
+});
+
+test("bulk update, archive, and restore jobs", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Import", exact: true }).click();
+  const csv = [
+    "Job Title,Company,Status,URL,Location,Tech Stack,Date Discovered",
+    "Bulk Frontend Engineer,Synthetic Alpha,Saved,https://example.test/jobs/bulk-alpha,Remote,React,2026-08-20",
+    "Bulk UI Engineer,Synthetic Beta,Saved,https://example.test/jobs/bulk-beta,Warsaw,TypeScript,2026-08-21",
+  ].join("\n");
+  await page.getByLabel("CSV file").setInputFiles({ name: "synthetic-bulk-jobs.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+  await page.getByRole("button", { name: "Import 2 valid jobs" }).click();
+
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await page.getByLabel("Select all displayed jobs").check();
+  await page.getByLabel("New status").selectOption("interview");
+  await page.getByRole("button", { name: "Update status" }).click();
+  await expect(page.getByText("2 jobs updated.")).toBeVisible();
+  await expect(page.locator("tbody tr").filter({ hasText: "Interview" })).toHaveCount(2);
+
+  await page.getByLabel("Select all displayed jobs").check();
+  await page.getByRole("button", { name: "Archive selected" }).click();
+  await expect(page.getByText("No jobs yet")).toBeVisible();
+
+  await page.getByRole("link", { name: "Archived", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Archived jobs" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Bulk Frontend Engineer/ })).toBeVisible();
+  await page.getByLabel("Select all displayed jobs").check();
+  await page.getByRole("button", { name: "Restore selected" }).click();
+  await expect(page.getByText("No archived jobs")).toBeVisible();
+
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await expect(page.getByRole("link", { name: /Bulk Frontend Engineer/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Bulk UI Engineer/ })).toBeVisible();
 });
 
 test("job creation, list, detail, edit, board status, dashboard, and delete", async ({ page }) => {
@@ -351,12 +386,12 @@ test("generate, assess, and remove stable CV versions from approved skills", asy
     await route.continue();
   });
   await page.getByRole("button", { name: "Generate tailored resume", exact: true }).click();
-  await expect(page.getByText("Resume #1 generated.")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #1"]);
+  await expect(page.getByText("Resume generated.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["SyntheticCandidate_SyntheticHiringCo_CV.pdf"]);
   expect(generationActionRequests).toBe(1);
   await page.getByRole("button", { name: "Generate tailored resume", exact: true }).dblclick();
-  await expect(page.getByText("Resume #2 generated.")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #2", "CV #1"]);
+  await expect(page.getByText("Resume generated.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["SyntheticCandidate_SyntheticHiringCo_CV.pdf", "SyntheticCandidate_SyntheticHiringCo_CV.pdf"]);
   expect(generationActionRequests).toBe(2);
   await page.unroute("**/*");
 
@@ -366,14 +401,14 @@ test("generate, assess, and remove stable CV versions from approved skills", asy
   await expect(page.getByLabel("CV #1 fit assessment")).toContainText("10/10");
   await expect(page.getByLabel("CV #1 fit assessment")).toContainText("Strong matches");
 
-  const cv2Row = page.locator(".cv-list > li").filter({ hasText: "CV #2" });
+  const cv2Row = page.locator(".cv-list > li").filter({ hasText: "Version 2" });
   page.once("dialog", (dialog) => dialog.accept());
   await cv2Row.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(page.getByText("Generated CV removed. Its version number remains reserved.")).toBeVisible();
-  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #1"]);
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["SyntheticCandidate_SyntheticHiringCo_CV.pdf"]);
   await page.getByRole("button", { name: "Generate tailored resume", exact: true }).click();
-  await expect(page.getByText("Resume #3 generated.")).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["CV #3", "CV #1"]);
+  await expect(page.getByText("Resume generated.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".cv-record-heading > strong")).toHaveText(["SyntheticCandidate_SyntheticHiringCo_CV.pdf", "SyntheticCandidate_SyntheticHiringCo_CV.pdf"]);
   await expect(page.getByRole("link", { name: "Preview" })).toHaveCount(2);
   await expect(page.getByRole("link", { name: "Download" })).toHaveCount(2);
 
@@ -394,7 +429,7 @@ test("generate, assess, and remove stable CV versions from approved skills", asy
     }
     const download = await page.request.get(downloadHref);
     expect(download.ok()).toBeTruthy();
-    expect(download.headers()["content-disposition"]).toContain(`attachment; filename*=UTF-8''cv-v${index === 0 ? 3 : 1}.pdf`);
+    expect(download.headers()["content-disposition"]).toContain("attachment; filename*=UTF-8''SyntheticCandidate_SyntheticHiringCo_CV.pdf");
   }
 
   await page.context().clearCookies();

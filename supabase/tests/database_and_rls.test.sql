@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(111);
+select plan(114);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -23,6 +23,7 @@ select is((select count(*) from public.job_status_history), 1::bigint, 'insert t
 select is((with changed as (update public.jobs set title = 'Senior Frontend Engineer' returning *) select count(*) from changed), 1::bigint, 'user A can update the owned job');
 select is((with changed as (update public.jobs set status = 'interview' returning *) select count(*) from changed), 1::bigint, 'user A can change status');
 select is((select count(*) from public.job_status_history), 2::bigint, 'status change trigger records history');
+select is((with changed as (update public.jobs set archived_at = now() returning *) select count(*) from changed), 1::bigint, 'user A can archive the owned job');
 select throws_ok(
   $$insert into public.jobs (user_id, title, company, discovered_on, dedupe_key)
     values ('11111111-1111-4111-8111-111111111111', 'x', 'Synthetic Labs', '2026-08-01', 'fallback:invalid-title')$$,
@@ -56,11 +57,13 @@ select throws_ok(
   'user B cannot create a job for user A'
 );
 select is((with changed as (update public.jobs set title = 'Stolen' where user_id = '11111111-1111-4111-8111-111111111111' returning *) select count(*) from changed), 0::bigint, 'user B cannot update user A job');
+select is((with changed as (update public.jobs set archived_at = now() where user_id = '11111111-1111-4111-8111-111111111111' returning *) select count(*) from changed), 0::bigint, 'user B cannot archive user A job');
 select is((with removed as (delete from public.jobs where user_id = '11111111-1111-4111-8111-111111111111' returning *) select count(*) from removed), 0::bigint, 'user B cannot delete user A job');
 select is((select count(*) from public.job_status_history), 0::bigint, 'user B cannot read user A status history');
 
 set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
 select is((select count(*) from public.jobs where title = 'Senior Frontend Engineer'), 1::bigint, 'user A job remains unchanged after user B attempts');
+select is((with changed as (update public.jobs set archived_at = null returning *) select count(*) from changed), 1::bigint, 'user A can restore the owned job');
 
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 select lives_ok(

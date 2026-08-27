@@ -30,6 +30,19 @@ const REQUIREMENT_CATEGORIES: VacancyRequirement["category"][] = [
 export const REQUIREMENT_SECTIONS = VACANCY_REQUIREMENT_SECTIONS;
 const MAX_REQUIREMENT_EVIDENCE_LENGTH = 1200;
 
+function filenamePart(value: string, fallback: string): string {
+  const normalized = value
+    .normalize("NFKD")
+    .replace(/\p{Mark}+/gu, "")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "")
+    .slice(0, 70);
+  return normalized || fallback;
+}
+
+export function generatedCvFilename(candidateName: string, companyName: string): string {
+  return `${filenamePart(candidateName, "Candidate")}_${filenamePart(companyName, "Company")}_CV.pdf`;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

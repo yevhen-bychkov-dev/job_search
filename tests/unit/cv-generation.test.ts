@@ -4,7 +4,7 @@ import test from "node:test";
 import { buildGeminiAnalysisRequest, buildGeminiCvAssessmentRequest, buildGeminiResumeRequest, geminiThinkingLevelForStage, isHighQualityCvModel } from "../../src/features/cvs/ai/gemini-request.ts";
 import { fetchGeminiWithFallback, isRetryableGeminiStatus } from "../../src/features/cvs/ai/gemini-retry.ts";
 import { cvFitAssessmentJsonSchema, CvAiProviderError, extractGeminiStructuredResponse, resumeContentJsonSchema, skillSuggestionJsonSchema } from "../../src/features/cvs/ai/provider.ts";
-import { nextCvVersion, parseCvFitAssessment, parseGeneratedCvContent, parseStoredGeneratedCvContent } from "../../src/features/cvs/domain.ts";
+import { generatedCvFilename, nextCvVersion, parseCvFitAssessment, parseGeneratedCvContent, parseStoredGeneratedCvContent } from "../../src/features/cvs/domain.ts";
 import { candidateProfileForAi, CANDIDATE_PROFILE_EXAMPLE, parseCandidateProfile } from "../../src/features/knowledge/candidate-profile.ts";
 import type { VacancyAnalysis } from "../../src/features/cvs/types.ts";
 
@@ -17,6 +17,12 @@ function profile() {
 const EMPTY_ANALYSIS: VacancyAnalysis = {
   mustHaveTechnical: [], niceToHaveTechnical: [], tooling: [], architecture: [], domainKnowledge: [], responsibilities: [], ownershipExpectations: [], collaborationExpectations: [], leadershipExpectations: [], senioritySignals: [], atsKeywords: [], employerTerminology: [],
 };
+
+test("generated CV filenames use candidate and company names without versions", () => {
+  assert.equal(generatedCvFilename("Yevhen Bychkov", "Test Company"), "YevhenBychkov_TestCompany_CV.pdf");
+  assert.equal(generatedCvFilename("Éva / Example", "R&D: Labs"), "EvaExample_RDLabs_CV.pdf");
+  assert.doesNotMatch(generatedCvFilename("Yevhen Bychkov", "Test Company"), /\d/);
+});
 
 test("Candidate Profile parsing is strict and the Gemini projection removes contact PII", () => {
   const serialized = JSON.stringify(candidateProfileForAi(profile()));

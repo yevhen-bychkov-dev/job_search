@@ -16,7 +16,8 @@ export default async function DashboardPage() {
     store.listJobs(identity.userId),
     store.listStatusHistory(identity.userId),
   ]);
-  const summary = buildDashboardSummary(jobs, history);
+  const activeJobIds = new Set(jobs.map((job) => job.id));
+  const summary = buildDashboardSummary(jobs, history.filter((event) => activeJobIds.has(event.jobId)));
   const metrics = [
     ["Total jobs", summary.metrics.total, "All tracked opportunities"],
     ["Applied", summary.metrics.applied, "Currently marked applied"],

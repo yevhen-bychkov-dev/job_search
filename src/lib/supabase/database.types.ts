@@ -72,6 +72,7 @@ export type Database = {
       jobs: {
         Row: {
           applied_on: string | null;
+          archived_at: string | null;
           company: string;
           created_at: string;
           dedupe_key: string;
@@ -95,6 +96,7 @@ export type Database = {
         };
         Insert: {
           applied_on?: string | null;
+          archived_at?: string | null;
           company: string;
           created_at?: string;
           dedupe_key: string;
@@ -118,6 +120,7 @@ export type Database = {
         };
         Update: {
           applied_on?: string | null;
+          archived_at?: string | null;
           company?: string;
           created_at?: string;
           dedupe_key?: string;

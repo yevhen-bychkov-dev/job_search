@@ -3,8 +3,8 @@ import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { requireIdentity } from "@/features/auth/session";
+import { BulkJobsTable } from "@/features/jobs/bulk-jobs-table";
 import { parseJobStatus, parseWorkMode } from "@/features/jobs/domain";
-import { StatusBadge } from "@/features/jobs/status-badge";
 import { JOB_STATUS_LABELS, JOB_STATUSES, WORK_MODE_LABELS, WORK_MODES } from "@/features/jobs/types";
 import { getAppStore } from "@/lib/data/server-store";
 
@@ -27,6 +27,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
     <div className="page-stack">
       <PageHeader eyebrow="Pipeline" title="Jobs" description="Search, filter, and manage every opportunity in one place." action={<Link className="button button-primary" href="/jobs/new">Add job</Link>} />
       {query.deleted === "1" ? <p className="alert alert-success" role="status">Job deleted.</p> : null}
+      {query.archived === "1" ? <p className="alert alert-success" role="status">Job archived.</p> : null}
       <form className="filter-bar" method="get">
         <div className="field search-field"><label className="sr-only" htmlFor="search">Search jobs</label><input id="search" name="search" type="search" defaultValue={search} placeholder="Search title, company, technology…" /></div>
         <div className="field"><label className="sr-only" htmlFor="status-filter">Status</label><select id="status-filter" name="status" defaultValue={status ?? ""}><option value="">All statuses</option>{JOB_STATUSES.map((item) => <option key={item} value={item}>{JOB_STATUS_LABELS[item]}</option>)}</select></div>
@@ -37,11 +38,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       {jobs.length === 0 ? (
         <section className="empty-state"><span className="empty-icon">⌕</span><h2>{search || status || workMode ? "No jobs match these filters" : "No jobs yet"}</h2><p>{search || status || workMode ? "Try a broader search or clear the filters." : "Add the first opportunity or import your spreadsheet history."}</p><div className="button-row"><Link className="button button-primary" href="/jobs/new">Add job</Link><Link className="button button-secondary" href="/import">Import CSV</Link></div></section>
       ) : (
-        <div className="card table-wrap">
-          <table className="jobs-table"><thead><tr><th>Job</th><th>Status</th><th>Location</th><th>Work mode</th><th>Discovered</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
-            {jobs.map((job) => <tr key={job.id}><td><Link className="job-link" href={`/jobs/${job.id}`}><strong>{job.title}</strong><span>{job.company}</span></Link></td><td><StatusBadge status={job.status} /></td><td>{job.location || "—"}</td><td>{WORK_MODE_LABELS[job.workMode]}</td><td>{job.discoveredOn}</td><td><Link className="text-link" href={`/jobs/${job.id}`}>Open</Link></td></tr>)}
-          </tbody></table>
-        </div>
+        <BulkJobsTable jobs={jobs.map(({ id, title, company, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }) => ({ id, title, company, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }))} archiveMode="active" />
       )}
     </div>
   );

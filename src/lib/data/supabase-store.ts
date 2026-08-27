@@ -2,7 +2,7 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
-import { nextCvVersion, parseCvFitAssessment, parseStoredGeneratedCvContent, parseVacancyAnalysis, recoverSavedJobRequirementsFromAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
+import { generatedCvFilename, nextCvVersion, parseCvFitAssessment, parseStoredGeneratedCvContent, parseVacancyAnalysis, recoverSavedJobRequirementsFromAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
 import type { ApprovedResumeSkill, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
@@ -42,7 +42,7 @@ async function getJobRows(userId: string) {
   const { data, error } = await supabase
     .from("jobs")
     .select(
-      "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+      "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,archived_at,created_at,updated_at",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
@@ -69,6 +69,7 @@ function toJob(row: JobRow): Job {
     notes: row.notes,
     discoveredOn: row.discovered_on,
     appliedOn: row.applied_on ?? "",
+    archivedAt: row.archived_at ?? "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -149,6 +150,7 @@ export class SupabaseAppStore implements AppStore {
   async listJobs(userId: string, query: JobQuery = {}): Promise<Job[]> {
     return (await getJobRows(userId))
       .map(toJob)
+      .filter((job) => query.archive === "all" || (query.archive === "archived" ? Boolean(job.archivedAt) : !job.archivedAt))
       .filter((job) => !query.status || job.status === query.status)
       .filter((job) => !query.workMode || job.workMode === query.workMode)
       .filter((job) => matchesJobQuery(job, query.search ?? ""));
@@ -159,7 +161,7 @@ export class SupabaseAppStore implements AppStore {
     const { data, error } = await supabase
       .from("jobs")
       .select(
-        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,archived_at,created_at,updated_at",
       )
       .eq("user_id", userId)
       .eq("id", id)
@@ -174,7 +176,7 @@ export class SupabaseAppStore implements AppStore {
       .from("jobs")
       .insert(jobInsert(userId, input))
       .select(
-        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,archived_at,created_at,updated_at",
       )
       .single();
     if (error) throwDataError("Unable to create job", error);
@@ -274,7 +276,7 @@ export class SupabaseAppStore implements AppStore {
       .eq("id", id)
       .eq("updated_at", expectedUpdatedAt)
       .select(
-        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,archived_at,created_at,updated_at",
       )
       .maybeSingle();
     if (error) throwDataError("Unable to update job", error);
@@ -298,7 +300,7 @@ export class SupabaseAppStore implements AppStore {
       .eq("user_id", userId)
       .eq("id", id)
       .select(
-        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+        "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,archived_at,created_at,updated_at",
       )
       .maybeSingle();
     if (error) throw new Error(`Unable to update job status: ${error.message}`);
@@ -312,7 +314,7 @@ export class SupabaseAppStore implements AppStore {
         .eq("status", "applied")
         .is("applied_on", null)
         .select(
-          "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,created_at,updated_at",
+          "id,title,company,status,source,source_url,external_source,external_job_id,location,work_mode,employment_type,salary,description,technologies,notes,discovered_on,applied_on,archived_at,created_at,updated_at",
         )
         .maybeSingle();
       if (appliedDateUpdate.error) {
@@ -324,6 +326,44 @@ export class SupabaseAppStore implements AppStore {
       return latest;
     }
     return toJob(data);
+  }
+
+  async updateJobsStatus(
+    userId: string,
+    ids: string[],
+    status: JobStatus,
+    appliedOn: string,
+  ): Promise<number> {
+    if (ids.length === 0) return 0;
+    const supabase = await createServerSupabaseClient();
+    const owned = await supabase.from("jobs").select("id").eq("user_id", userId).in("id", ids);
+    if (owned.error) throw new Error(`Unable to verify selected jobs: ${owned.error.message}`);
+    if (owned.data.length !== ids.length) throw new ResourceNotFoundError("One or more jobs");
+    const updated = await supabase.from("jobs").update({ status }).eq("user_id", userId).in("id", ids).select("id");
+    if (updated.error) throw new Error(`Unable to update selected jobs: ${updated.error.message}`);
+    if (updated.data.length !== ids.length) throw new ResourceNotFoundError("One or more jobs");
+    if (status === "applied") {
+      const applied = await supabase.from("jobs").update({ applied_on: appliedOn }).eq("user_id", userId).in("id", ids).is("applied_on", null);
+      if (applied.error) throw new Error(`Unable to set applied dates for selected jobs: ${applied.error.message}`);
+    }
+    return updated.data.length;
+  }
+
+  async setJobsArchived(userId: string, ids: string[], archived: boolean): Promise<number> {
+    if (ids.length === 0) return 0;
+    const supabase = await createServerSupabaseClient();
+    const owned = await supabase.from("jobs").select("id").eq("user_id", userId).in("id", ids);
+    if (owned.error) throw new Error(`Unable to verify selected jobs: ${owned.error.message}`);
+    if (owned.data.length !== ids.length) throw new ResourceNotFoundError("One or more jobs");
+    const updated = await supabase
+      .from("jobs")
+      .update({ archived_at: archived ? new Date().toISOString() : null })
+      .eq("user_id", userId)
+      .in("id", ids)
+      .select("id");
+    if (updated.error) throw new Error(`Unable to ${archived ? "archive" : "restore"} selected jobs: ${updated.error.message}`);
+    if (updated.data.length !== ids.length) throw new ResourceNotFoundError("One or more jobs");
+    return updated.data.length;
   }
 
   async deleteJob(userId: string, id: string): Promise<void> {
@@ -869,12 +909,13 @@ export class SupabaseAppStore implements AppStore {
     userId: string,
     jobId: string,
     id: string,
-    download: boolean,
+    _download: boolean,
   ) {
+    void _download;
     const supabase = await createServerSupabaseClient();
     const { data, error } = await supabase
       .from("generated_cvs")
-      .select("file_path,version")
+      .select("file_path")
       .eq("user_id", userId)
       .eq("job_id", jobId)
       .eq("id", id)
@@ -882,11 +923,19 @@ export class SupabaseAppStore implements AppStore {
       .maybeSingle();
     if (error) throw new Error(`Unable to load generated CV: ${error.message}`);
     if (!data) throw new ResourceNotFoundError("CV");
-    const signed = download
-      ? await supabase.storage.from("generated-cvs").createSignedUrl(data.file_path, 60, { download: `cv-v${data.version}.pdf` })
-      : await supabase.storage.from("generated-cvs").createSignedUrl(data.file_path, 60);
-    if (signed.error) throw new Error(`Unable to open generated CV: ${signed.error.message}`);
-    return { kind: "redirect" as const, url: signed.data.signedUrl };
+    const [job, profile, download] = await Promise.all([
+      this.getJob(userId, jobId),
+      this.getCandidateProfile(userId),
+      supabase.storage.from("generated-cvs").download(data.file_path),
+    ]);
+    if (!job) throw new ResourceNotFoundError("Job");
+    if (download.error) throw new Error(`Unable to open generated CV: ${download.error.message}`);
+    return {
+      kind: "content" as const,
+      bytes: new Uint8Array(await download.data.arrayBuffer()),
+      mimeType: "application/pdf",
+      filename: generatedCvFilename(profile?.personal.name ?? "Candidate", job.company),
+    };
   }
 
   async saveGeneratedCvAssessment(

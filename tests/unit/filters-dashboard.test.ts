@@ -34,9 +34,9 @@ test("filter settings reject overlap and evaluate include/exclude/title rules", 
 
 test("dashboard derives current metrics and historical trends from stored records", () => {
   const jobs: Job[] = [
-    { id: "1", ...jobInput, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-04T00:00:00Z" },
-    { id: "2", ...jobInput, status: "rejected", appliedOn: "2026-08-01", createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" },
-    { id: "3", ...jobInput, status: "offer", appliedOn: "", createdAt: "2026-08-03T00:00:00Z", updatedAt: "2026-08-03T00:00:00Z" },
+    { id: "1", ...jobInput, archivedAt: "", createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-04T00:00:00Z" },
+    { id: "2", ...jobInput, status: "rejected", appliedOn: "2026-08-01", archivedAt: "", createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" },
+    { id: "3", ...jobInput, status: "offer", appliedOn: "", archivedAt: "", createdAt: "2026-08-03T00:00:00Z", updatedAt: "2026-08-03T00:00:00Z" },
   ];
   const history: JobStatusHistory[] = [
     { id: "h1", jobId: "2", fromStatus: "interview", toStatus: "rejected", changedAt: "2026-08-02T10:00:00Z" },

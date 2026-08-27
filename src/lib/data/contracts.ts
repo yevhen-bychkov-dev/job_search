@@ -86,6 +86,8 @@ export interface AppStore {
     expectedUpdatedAt: string,
   ): Promise<Job>;
   updateJobStatus(userId: string, id: string, status: JobStatus, appliedOn: string): Promise<Job>;
+  updateJobsStatus(userId: string, ids: string[], status: JobStatus, appliedOn: string): Promise<number>;
+  setJobsArchived(userId: string, ids: string[], archived: boolean): Promise<number>;
   deleteJob(userId: string, id: string): Promise<void>;
   listStatusHistory(userId: string, jobId?: string): Promise<JobStatusHistory[]>;
   getFilters(userId: string): Promise<FilterSettings>;

@@ -75,7 +75,7 @@ export async function generateCvAction(jobId: string, _previous: CvActionState, 
       : result;
     if (rendered.kind === "in_progress") return { status: "in_progress", message: "Another request owns this CV. Wait a moment, then try again.", generationId: rendered.generation.id, stage: rendered.generation.currentStage ?? "render" };
     revalidatePath(`/jobs/${jobId}`);
-    return { status: "success", message: `Resume #${rendered.cv.version} generated.`, generationId: rendered.generation.id, stage: "render" };
+    return { status: "success", message: "Resume generated.", generationId: rendered.generation.id, stage: "render" };
   } catch (error) {
     revalidatePath(`/jobs/${jobId}`);
     return failure("cvs.generate", error);

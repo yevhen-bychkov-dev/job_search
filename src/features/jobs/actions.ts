@@ -14,13 +14,19 @@ import { reportUnexpectedError } from "@/lib/server-errors";
 import { isUuid } from "@/lib/validation";
 
 import { dateInTimeZone, formDataToRecord, parseJobInput, parseJobStatus } from "./domain";
-import type { ActionState } from "./types";
+import type { ActionState, BulkJobActionState } from "./types";
 
 function revalidateJobViews(id?: string) {
   revalidatePath("/dashboard");
   revalidatePath("/jobs");
+  revalidatePath("/archived");
   revalidatePath("/board");
   if (id) revalidatePath(`/jobs/${id}`);
+}
+
+function selectedJobIds(formData: FormData): string[] | null {
+  const ids = [...new Set(formData.getAll("ids").filter((value): value is string => typeof value === "string"))];
+  return ids.length >= 1 && ids.length <= 100 && ids.every(isUuid) ? ids : null;
 }
 
 function actionError(error: unknown, values: Record<string, string>): ActionState {
@@ -105,6 +111,54 @@ export async function changeJobStatusAction(
   }
   revalidateJobViews(id);
   redirect(`${returnTo}?statusUpdated=1`);
+}
+
+export async function bulkJobsAction(
+  _previous: BulkJobActionState,
+  formData: FormData,
+): Promise<BulkJobActionState> {
+  void _previous;
+  const identity = await requireIdentity();
+  const ids = selectedJobIds(formData);
+  const operation = formData.get("operation");
+  if (!ids) return { status: "error", message: "Select between 1 and 100 jobs." };
+  try {
+    if (operation === "status") {
+      const status = parseJobStatus(formData.get("status"));
+      if (!status) return { status: "error", message: "Choose a valid status." };
+      const count = await getAppStore().updateJobsStatus(identity.userId, ids, status, dateInTimeZone());
+      revalidateJobViews();
+      revalidatePath("/jobs/[id]", "page");
+      return { status: "success", message: `${count} ${count === 1 ? "job" : "jobs"} updated.` };
+    }
+    if (operation === "archive" || operation === "restore") {
+      const archived = operation === "archive";
+      const count = await getAppStore().setJobsArchived(identity.userId, ids, archived);
+      revalidateJobViews();
+      revalidatePath("/jobs/[id]", "page");
+      return { status: "success", message: `${count} ${count === 1 ? "job" : "jobs"} ${archived ? "archived" : "restored"}.` };
+    }
+    return { status: "error", message: "Choose a valid bulk action." };
+  } catch (error) {
+    if (error instanceof ResourceNotFoundError) {
+      return { status: "error", message: "One or more selected jobs are no longer available." };
+    }
+    reportUnexpectedError("jobs.bulk-mutation", error);
+    return { status: "error", message: "The selected jobs could not be updated. Please try again." };
+  }
+}
+
+export async function setJobArchivedAction(id: string, archived: boolean): Promise<void> {
+  const identity = await requireIdentity();
+  if (!isUuid(id)) redirect("/jobs?error=invalid-id");
+  try {
+    await getAppStore().setJobsArchived(identity.userId, [id], archived);
+  } catch (error) {
+    if (!(error instanceof ResourceNotFoundError)) reportUnexpectedError("jobs.archive", error);
+    redirect(`/jobs/${id}?error=archive`);
+  }
+  revalidateJobViews(id);
+  redirect(archived ? "/jobs?archived=1" : "/archived?restored=1");
 }
 
 export async function deleteJobAction(id: string): Promise<void> {

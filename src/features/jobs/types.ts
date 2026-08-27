@@ -70,13 +70,14 @@ export type Job = {
   notes: string;
   discoveredOn: string;
   appliedOn: string;
+  archivedAt: string;
   createdAt: string;
   updatedAt: string;
 };
 
 export type JobInput = Omit<
   Job,
-  "id" | "createdAt" | "updatedAt" | "externalSource" | "externalJobId"
+  "id" | "archivedAt" | "createdAt" | "updatedAt" | "externalSource" | "externalJobId"
 > & {
   externalSource?: string;
   externalJobId?: string;
@@ -94,6 +95,7 @@ export type JobQuery = {
   search?: string;
   status?: JobStatus;
   workMode?: WorkMode;
+  archive?: "active" | "archived" | "all";
 };
 
 export type ValidationResult<T> =
@@ -107,7 +109,17 @@ export type ActionState = {
   values?: Record<string, string>;
 };
 
+export type BulkJobActionState = {
+  status: "idle" | "success" | "error";
+  message: string;
+};
+
 export const INITIAL_ACTION_STATE: ActionState = {
+  status: "idle",
+  message: "",
+};
+
+export const INITIAL_BULK_JOB_ACTION_STATE: BulkJobActionState = {
   status: "idle",
   message: "",
 };

@@ -6,9 +6,11 @@ import { formatDateTimeInTimeZone } from "@/features/jobs/domain";
 import type { GeneratedCv, JobResumeRequirements, ResumeGeneration } from "./types";
 import { deleteGeneratedCvAction } from "./actions";
 import { AssessCvForm } from "./assess-cv-form";
+import { generatedCvFilename } from "./domain";
 import { JobRequirementsEditor } from "./job-requirements-editor";
 
-export function CvSection({ jobId, cvs, sourceUrl, hasCandidateProfile, hasResumeTemplate, latestGeneration, jobRequirements }: { jobId: string; cvs: GeneratedCv[]; sourceUrl: string; hasCandidateProfile: boolean; hasResumeTemplate: boolean; latestGeneration: ResumeGeneration | null; jobRequirements: JobResumeRequirements | null }) {
+export function CvSection({ jobId, companyName, candidateName, cvs, sourceUrl, hasCandidateProfile, hasResumeTemplate, latestGeneration, jobRequirements }: { jobId: string; companyName: string; candidateName: string; cvs: GeneratedCv[]; sourceUrl: string; hasCandidateProfile: boolean; hasResumeTemplate: boolean; latestGeneration: ResumeGeneration | null; jobRequirements: JobResumeRequirements | null }) {
+  const filename = generatedCvFilename(candidateName, companyName);
   return (
     <article className="card stack" aria-labelledby="cvs-heading">
       <div className="section-heading">
@@ -29,7 +31,7 @@ export function CvSection({ jobId, cvs, sourceUrl, hasCandidateProfile, hasResum
         ? <div className="cv-empty"><p>No CVs generated for this job yet.</p></div>
         : <ol className="cv-list">{cvs.map((cv) => <li key={cv.id}>
           <div className="cv-record stack">
-            <div className="cv-record-heading"><strong>CV #{cv.version}</strong><span>Generated {formatDateTimeInTimeZone(cv.createdAt)}</span></div>
+            <div className="cv-record-heading"><strong>{filename}</strong><span>Version {cv.version} · Generated {formatDateTimeInTimeZone(cv.createdAt)}</span></div>
             {cv.assessment ? <section className="cv-fit-result" aria-label={`CV #${cv.version} fit assessment`}>
               <div className="cv-fit-score"><strong>{cv.assessment.fitScore}/10</strong><span>CV fit</span></div>
               <div className="stack">
