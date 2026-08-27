@@ -17,9 +17,12 @@ import {
   normalizeNoFluffPosting,
   parseNoFluffJobDescription,
 } from "./normalize";
-import { MAX_NO_FLUFF_SEARCH_PAGES, noFluffPagesToFetch } from "./search";
+import {
+  MAX_NO_FLUFF_SEARCH_PAGES,
+  NO_FLUFF_PAGE_SIZE,
+  noFluffPagesToFetch,
+} from "./search";
 
-const PAGE_SIZE = 50;
 const PAGE_CONCURRENCY = 3;
 
 export const NO_FLUFF_FILTER_OPTIONS = {
@@ -107,6 +110,7 @@ function matchesWorkMode(job: NormalizedExternalJob, filters: JobSearchFilters):
 export class NoFluffJobsAdapter implements JobSourceAdapter {
   readonly id = "nofluffjobs" as const;
   readonly name = "NoFluffJobs";
+  readonly websiteUrl = "https://nofluffjobs.com/pl";
   readonly filterOptions = NO_FLUFF_FILTER_OPTIONS;
 
   async searchJobs(filters: JobSearchFilters): Promise<ExternalJobSearchResult> {
@@ -133,7 +137,7 @@ export class NoFluffJobsAdapter implements JobSourceAdapter {
     return {
       jobs: newestFirst(mergeNoFluffJobs(jobs).filter((job) => matchesWorkMode(job, filters))),
       sourceResultCount: first.totalCount,
-      sourceBatchLimit: pageCount * PAGE_SIZE,
+      sourceBatchLimit: pageCount * NO_FLUFF_PAGE_SIZE,
       sourceHasMore: first.totalPages > MAX_NO_FLUFF_SEARCH_PAGES,
     };
   }

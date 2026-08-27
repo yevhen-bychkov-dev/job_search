@@ -8,20 +8,16 @@ import type {
   JobSourceAdapter,
   NormalizedExternalJob,
 } from "../types";
-import { fetchJustJoinHtml } from "./client";
+import { fetchJustJoinHtml, fetchJustJoinSearchPage } from "./client";
 import { normalizeJustJoinOffer } from "./normalize";
-import { parseJustJoinDescriptionHtml, parseJustJoinSearchHtml } from "./parse";
+import { parseJustJoinDescriptionHtml, parseJustJoinSearchResponse } from "./parse";
+import {
+  buildJustJoinSearchUrl,
+  JUST_JOIN_PAGE_SIZE,
+  justJoinPagesToFetch,
+} from "./search";
 
-function locationSlug(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("en")
-    .replace(/ł/g, "l")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 100);
-}
+const PAGE_CONCURRENCY = 3;
 
 export const JUST_JOIN_FILTER_OPTIONS = {
   categories: [
@@ -49,27 +45,6 @@ export const JUST_JOIN_FILTER_OPTIONS = {
   ],
 } as const;
 
-export function buildJustJoinSearchUrl(filters: JobSearchFilters): URL {
-  const location = locationSlug(filters.location) || "all-locations";
-  const category = filters.categories[0];
-  const path = category
-    ? `/job-offers/${encodeURIComponent(location)}/${encodeURIComponent(category)}`
-    : `/job-offers/${encodeURIComponent(location)}`;
-  const url = new URL(`https://justjoin.it${path}`);
-  if (filters.keywords) url.searchParams.set("keyword", filters.keywords);
-  if (filters.workModes.length > 0) {
-    url.searchParams.set(
-      "remote-work-options",
-      filters.workModes.map((mode) => mode === "onsite" ? "office" : mode).join(","),
-    );
-  }
-  if (filters.seniorities.length > 0) {
-    url.searchParams.set("experience-level", filters.seniorities.join(","));
-  }
-  url.searchParams.set("sortBy", "published");
-  return url;
-}
-
 const SYNTHETIC_JOBS: NormalizedExternalJob[] = [
   {
     source: "justjoinit", sourceName: "JustJoinIT", externalId: "11111111-aaaa-4111-8111-111111111111",
@@ -95,6 +70,7 @@ const SYNTHETIC_JOBS: NormalizedExternalJob[] = [
 export class JustJoinAdapter implements JobSourceAdapter {
   readonly id = "justjoinit" as const;
   readonly name = "JustJoinIT";
+  readonly websiteUrl = "https://justjoin.it/job-offers";
   readonly filterOptions = JUST_JOIN_FILTER_OPTIONS;
 
   async searchJobs(filters: JobSearchFilters): Promise<ExternalJobSearchResult> {
@@ -106,16 +82,30 @@ export class JustJoinAdapter implements JobSourceAdapter {
         .filter((job) => filters.workModes.length === 0 || filters.workModes.includes(job.workMode));
       return { jobs: newestFirst(jobs), sourceResultCount: jobs.length, sourceBatchLimit: 100, sourceHasMore: false };
     }
-    const parsed = parseJustJoinSearchHtml(await fetchJustJoinHtml(buildJustJoinSearchUrl(filters)));
-    const jobs = newestFirst(parsed.offers.flatMap((offer) => {
+    const first = parseJustJoinSearchResponse(await fetchJustJoinSearchPage(buildJustJoinSearchUrl(filters)));
+    const pageCount = justJoinPagesToFetch(first.totalItems);
+    const offers = [...first.offers];
+    for (let page = 1; page < pageCount; page += PAGE_CONCURRENCY) {
+      const pages = Array.from(
+        { length: Math.min(PAGE_CONCURRENCY, pageCount - page) },
+        (_, index) => page + index,
+      );
+      const batch = await Promise.all(pages.map(async (pageIndex) => (
+        parseJustJoinSearchResponse(
+          await fetchJustJoinSearchPage(buildJustJoinSearchUrl(filters, pageIndex * JUST_JOIN_PAGE_SIZE)),
+        )
+      )));
+      offers.push(...batch.flatMap((result) => result.offers));
+    }
+    const jobs = newestFirst(offers.flatMap((offer) => {
       const normalized = normalizeJustJoinOffer(offer);
       return normalized ? [normalized] : [];
     }));
     return {
       jobs,
-      sourceResultCount: parsed.totalItems,
-      sourceBatchLimit: parsed.batchSize,
-      sourceHasMore: parsed.hasMore,
+      sourceResultCount: first.totalItems,
+      sourceBatchLimit: pageCount * JUST_JOIN_PAGE_SIZE,
+      sourceHasMore: first.totalItems > pageCount * JUST_JOIN_PAGE_SIZE,
     };
   }
 

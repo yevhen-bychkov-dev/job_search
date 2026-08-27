@@ -11,6 +11,8 @@ import type {
   NormalizedExternalJob,
 } from "../../lib/job-sources/types.ts";
 
+export const DISCOVERY_PAGE_SIZE = 100;
+
 const SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const EXTERNAL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const FILTER_VALUE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 .+/_-]{0,59}$/;
@@ -126,6 +128,23 @@ export function newestFirst(jobs: NormalizedExternalJob[]): NormalizedExternalJo
     if (rightTime !== leftTime) return rightTime - leftTime;
     return left.externalId.localeCompare(right.externalId);
   });
+}
+
+export function paginateExternalJobs(jobs: NormalizedExternalJob[], requestedPage: number): {
+  jobs: NormalizedExternalJob[];
+  page: number;
+  pageCount: number;
+  startIndex: number;
+} {
+  const pageCount = Math.max(1, Math.ceil(jobs.length / DISCOVERY_PAGE_SIZE));
+  const page = Math.min(Math.max(1, Math.trunc(requestedPage) || 1), pageCount);
+  const startIndex = (page - 1) * DISCOVERY_PAGE_SIZE;
+  return {
+    jobs: jobs.slice(startIndex, startIndex + DISCOVERY_PAGE_SIZE),
+    page,
+    pageCount,
+    startIndex,
+  };
 }
 
 export function filterKnownExternalJobs(

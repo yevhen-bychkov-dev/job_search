@@ -38,7 +38,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       {jobs.length === 0 ? (
         <section className="empty-state"><span className="empty-icon">⌕</span><h2>{search || status || workMode ? "No jobs match these filters" : "No jobs yet"}</h2><p>{search || status || workMode ? "Try a broader search or clear the filters." : "Add the first opportunity or import your spreadsheet history."}</p><div className="button-row"><Link className="button button-primary" href="/jobs/new">Add job</Link><Link className="button button-secondary" href="/import">Import CSV</Link></div></section>
       ) : (
-        <BulkJobsTable jobs={jobs.map(({ id, title, company, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }) => ({ id, title, company, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }))} archiveMode="active" />
+        <BulkJobsTable jobs={jobs.map(({ id, title, company, source, externalSource, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }) => ({ id, title, company, source, externalSource, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }))} archiveMode="active" />
       )}
     </div>
   );

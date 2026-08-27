@@ -11,7 +11,7 @@ The goal is to turn that workflow into one centralized and extensible system.
 ## What it does
 
 * **Job tracking** — manage opportunities from discovery to offer or rejection with persistent status history.
-* **Job discovery** — search external job sources, review full vacancy details, save relevant jobs, and hide irrelevant results.
+* **Job discovery** — search JustJoinIT and NoFluffJobs in 100-job pages, launch focused searches on DOU, LinkedIn, Pracuj.pl, and We Work Remotely, review full vacancy details, save relevant jobs, and hide irrelevant results.
 * **Application board** — organize opportunities by their current hiring stage.
 * **Search preferences** — maintain preferred titles and included/excluded technologies.
 * **Duplicate prevention** — detect already saved or imported vacancies using stable external identities and normalized fallbacks.
@@ -48,7 +48,8 @@ flowchart LR
     DAL --> Storage["Private Supabase Storage"]
 
     Sources --> JJ["JustJoinIT"]
-    Sources -.-> Future["Additional job sources"]
+    Sources --> NF["NoFluffJobs"]
+    Sources -.-> Outbound["DOU · LinkedIn · Pracuj.pl · We Work Remotely"]
 
     CV --> Gemini["Gemini analysis + ResumeContent"]
     CV --> Template["Validated user HTML template"]
@@ -80,11 +81,11 @@ Each completed resume is stored as an immutable version associated with the job 
 
 Job discovery uses a source-adapter architecture.
 
-The first implemented source is **JustJoinIT**.
+The integrated sources are **JustJoinIT** and **NoFluffJobs**. Each explicit search retrieves bounded 100-job source pages, normalizes the results, and presents 100 vacancies per application page.
 
 Search results are normalized into a shared internal representation before reaching the UI. The application then compares them against saved and ignored vacancies before presenting the final result set.
 
-Full vacancy details are loaded only when needed.
+Full vacancy details are loaded only when needed. DOU, LinkedIn, Pracuj.pl, and We Work Remotely are outbound search tabs: they safely open a filtered board search in a new browser tab and do not scrape or silently import third-party pages.
 
 Adding another job board requires implementing a new source adapter while the discovery table, detail drawer, filtering, selection, deduplication, and persistence logic remain shared.
 

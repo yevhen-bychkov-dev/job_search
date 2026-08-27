@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { PageHeader } from "@/components/ui/page-header";
+import { SourceBadge } from "@/components/ui/source-badge";
 import { requireIdentity } from "@/features/auth/session";
 import { StatusForm } from "@/features/jobs/status-form";
 import { JOB_STATUS_LABELS, JOB_STATUSES } from "@/features/jobs/types";
@@ -21,7 +22,7 @@ export default async function BoardPage({ searchParams }: PageProps<"/board">) {
         <div className="board" aria-label="Jobs grouped by status">
           {JOB_STATUSES.map((status) => {
             const columnJobs = jobs.filter((job) => job.status === status);
-            return <section className="board-column" key={status} aria-labelledby={`column-${status}`}><header><h2 id={`column-${status}`}>{JOB_STATUS_LABELS[status]}</h2><span>{columnJobs.length}</span></header><div className="board-cards">{columnJobs.length ? columnJobs.map((job) => <article className="job-card" key={job.id}><Link href={`/jobs/${job.id}`}><span className="job-card-company">{job.company}</span><strong>{job.title}</strong><span className="job-card-location">{job.location || "Location not specified"}</span></Link><StatusForm id={job.id} status={job.status} compact returnTo="/board" /></article>) : <p className="column-empty">No jobs</p>}</div></section>;
+            return <section className="board-column" key={status} aria-labelledby={`column-${status}`}><header><h2 id={`column-${status}`}>{JOB_STATUS_LABELS[status]}</h2><span>{columnJobs.length}</span></header><div className="board-cards">{columnJobs.length ? columnJobs.map((job) => <article className="job-card" key={job.id}><Link href={`/jobs/${job.id}`}><span className="job-card-source"><SourceBadge source={job.source} externalSource={job.externalSource} /><span className="job-card-company">{job.company}</span></span><strong>{job.title}</strong><span className="job-card-location">{job.location || "Location not specified"}</span></Link><StatusForm id={job.id} status={job.status} compact returnTo="/board" /></article>) : <p className="column-empty">No jobs</p>}</div></section>;
           })}
         </div>
       )}

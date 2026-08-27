@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
 
+import { SourceBadge } from "@/components/ui/source-badge";
+
 import { bulkJobsAction } from "./actions";
 import { StatusBadge } from "./status-badge";
 import {
@@ -18,6 +20,8 @@ export type BulkJobRow = {
   id: string;
   title: string;
   company: string;
+  source: string;
+  externalSource?: string;
   status: JobStatus;
   location: string;
   workMode: WorkMode;
@@ -65,7 +69,7 @@ export function BulkJobsTable({ jobs, archiveMode }: { jobs: BulkJobRow[]; archi
             const checked = selectedIds.includes(job.id);
             return <tr key={job.id}>
               <td className="selection-column"><input type="checkbox" name="ids" value={job.id} aria-label={`Select ${job.title} at ${job.company}`} checked={checked} onChange={(event) => setSelection({ actionState: state, ids: event.target.checked ? [...selectedIds, job.id] : selectedIds.filter((id) => id !== job.id) })} /></td>
-              <td><Link className="job-link" href={`/jobs/${job.id}`}><strong>{job.title}</strong><span>{job.company}</span></Link></td>
+              <td><div className="job-list-identity"><SourceBadge source={job.source} externalSource={job.externalSource} /><Link className="job-link" href={`/jobs/${job.id}`}><strong>{job.title}</strong><span>{job.company}</span></Link></div></td>
               <td><StatusBadge status={job.status} /></td><td>{job.location || "—"}</td><td>{WORK_MODE_LABELS[job.workMode]}</td>
               <td>{archiveMode === "archived" ? job.archivedAt.slice(0, 10) : job.discoveredOn}</td>
               <td><Link className="text-link" href={`/jobs/${job.id}`}>Open</Link></td>

@@ -236,10 +236,12 @@ tbody tr:hover { background: #fbfcff; }
 .board-column > header span { display: grid; min-width: 25px; height: 25px; padding: 0 6px; place-items: center; border-radius: 99px; background: white; font-size: .72rem; font-weight: 700; }
 .board-cards { display: grid; align-content: start; gap: 10px; }
 .job-card { padding: 14px; border: 1px solid #e2e6ed; border-radius: 10px; background: white; box-shadow: 0 4px 14px rgba(30,42,72,.05); }
-.job-card > a { display: grid; gap: 4px; margin-bottom: 13px; }
+.job-card > a { display: grid; gap: 6px; margin-bottom: 13px; }
 .job-card strong { font-size: .88rem; line-height: 1.35; }
 .job-card-company { color: var(--primary); font-size: .72rem; font-weight: 700; }
 .job-card-location { color: var(--muted); font-size: .72rem; }
+.job-card-source { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.job-card-source .job-card-company { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .column-empty { margin: 40px 0; color: #98a2b3; text-align: center; font-size: .78rem; }
 
 .upload-panel { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
@@ -318,8 +320,8 @@ tbody tr:hover { background: #fbfcff; }
 .danger-zone p { margin: 0; color: var(--muted); }
 
 .discovery-workspace { gap: 18px; }
-.source-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
-.source-tab { padding: 10px 16px; color: var(--muted); border: 0; border-bottom: 2px solid transparent; background: transparent; font: inherit; font-size: .86rem; font-weight: 700; cursor: pointer; }
+.source-tabs { display: flex; max-width: 100%; overflow-x: auto; gap: 4px; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.source-tab { flex: 0 0 auto; padding: 10px 16px; color: var(--muted); border: 0; border-bottom: 2px solid transparent; background: transparent; font: inherit; font-size: .86rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .source-tab:hover { color: var(--ink); }
 .source-tab:focus-visible { outline: 3px solid rgba(49,87,213,.22); outline-offset: 2px; }
 .source-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
@@ -335,6 +337,7 @@ tbody tr:hover { background: #fbfcff; }
 .discovery-results-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .discovery-results-toolbar h2 { margin: 0 0 3px; font-size: 1.1rem; }
 .discovery-results-toolbar p { margin: 0; color: var(--muted); font-size: .8rem; }
+.discovery-results-toolbar .button-row { flex-wrap: nowrap; }
 .discovery-limit-note { color: #6941c6; border-color: #d9d6fe; background: #f4f3ff; }
 .discovery-table { min-width: 1190px; table-layout: fixed; }
 .discovery-table th:nth-child(1) { width: 48px; }
@@ -357,7 +360,32 @@ tbody tr:hover { background: #fbfcff; }
 .text-button.danger { color: var(--danger); }
 .technology-cell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .discovery-row-actions { display: flex; gap: 10px; }
-.load-more-button { justify-self: center; }
+.pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px; }
+.pagination-page { display: inline-grid; width: 36px; height: 36px; place-items: center; padding: 0; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; background: #fff; font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; }
+.pagination-page:hover { color: var(--primary); border-color: #b9c8f5; }
+.pagination-page:focus-visible { outline: 3px solid rgba(49,87,213,.2); outline-offset: 2px; }
+.pagination-page.active { color: #fff; border-color: var(--primary); background: var(--primary); }
+
+.source-identity { display: inline-flex; min-width: 0; align-items: center; gap: 7px; vertical-align: middle; }
+.source-badge { display: inline-grid; min-width: 34px; height: 28px; flex: 0 0 auto; place-items: center; padding: 0 6px; border: 1px solid #d0d5dd; border-radius: 7px; color: #344054; background: #f2f4f7; font-size: .68rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; }
+.source-label { overflow: hidden; color: #344054; font-size: .78rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.source-badge-jj { color: #175cd3; border-color: #b2ccff; background: #eff4ff; }
+.source-badge-nf { color: #067647; border-color: #abefc6; background: #ecfdf3; }
+.source-badge-dou { color: #b54708; border-color: #fedf89; background: #fffaeb; }
+.source-badge-linkedin { color: #175cd3; border-color: #b9e6fe; background: #f0f9ff; }
+.source-badge-pracuj { color: #b42318; border-color: #fecdca; background: #fef3f2; }
+.source-badge-wwr { color: #5925dc; border-color: #d9d6fe; background: #f4f3ff; }
+.job-list-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.job-list-identity .job-link { min-width: 0; }
+
+.external-board-panel { display: grid; gap: 22px; }
+.external-board-heading { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 14px; }
+.external-board-heading h2 { margin: 3px 0 5px; font-size: 1.2rem; }
+.external-board-heading p { margin: 0; color: var(--muted); }
+.external-board-filter-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+.external-board-actions { display: flex; align-items: end; gap: 16px; }
+.external-board-actions .button { margin-left: auto; }
+.external-board-note { margin: -8px 0 0; color: var(--muted); font-size: .78rem; }
 
 body.drawer-open { overflow: hidden; }
 .discovery-drawer-layer { position: fixed; z-index: 100; inset: 0; }
@@ -459,7 +487,11 @@ body.drawer-open { overflow: hidden; }
   .discovery-mode-fieldset { flex-wrap: wrap; padding-block: 8px; }
   .discovery-search-button { width: 100%; margin-left: 0; justify-self: stretch; }
   .discovery-results-toolbar { align-items: stretch; flex-direction: column; }
+  .discovery-results-toolbar .button-row { display: grid; grid-template-columns: 1fr; }
   .discovery-results-toolbar .button { width: 100%; }
+  .external-board-filter-grid { grid-template-columns: 1fr; }
+  .external-board-actions { align-items: stretch; flex-direction: column; }
+  .external-board-actions .button { width: 100%; margin-left: 0; }
   .discovery-drawer { width: 100%; min-width: 0; }
   .discovery-drawer-header, .discovery-drawer-body { padding-inline: 18px; }
   .discovery-drawer-footer { display: grid; grid-template-columns: 1fr 1fr; padding-inline: 18px; }

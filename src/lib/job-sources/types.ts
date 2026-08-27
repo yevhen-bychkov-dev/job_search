@@ -25,6 +25,7 @@ export type JobSourceFilterOptions = {
 export type JobSourceDefinition = {
   id: JobSourceId;
   name: string;
+  websiteUrl: string;
   filterOptions: JobSourceFilterOptions;
 };
 
@@ -61,6 +62,7 @@ export type ExternalJobSearchResult = {
 export interface JobSourceAdapter {
   readonly id: JobSourceId;
   readonly name: string;
+  readonly websiteUrl: string;
   readonly filterOptions: JobSourceFilterOptions;
   searchJobs(filters: JobSearchFilters): Promise<ExternalJobSearchResult>;
   getJobDetails(job: Pick<NormalizedExternalJob, "externalId" | "url">): Promise<{ description: string }>;

@@ -1,8 +1,8 @@
 import type { JobSearchFilters } from "../types";
 
 const SEARCH_ENDPOINT = "https://nofluffjobs.com/api/search/posting";
-const PAGE_SIZE = 50;
-export const MAX_NO_FLUFF_SEARCH_PAGES = 10;
+export const NO_FLUFF_PAGE_SIZE = 100;
+export const MAX_NO_FLUFF_SEARCH_PAGES = 5;
 
 function locationSlug(value: string): string {
   return value
@@ -21,7 +21,7 @@ export function buildNoFluffSearchRequest(filters: JobSearchFilters, page: numbe
 } {
   const url = new URL(SEARCH_ENDPOINT);
   url.searchParams.set("page", String(page));
-  url.searchParams.set("limit", String(PAGE_SIZE));
+  url.searchParams.set("limit", String(NO_FLUFF_PAGE_SIZE));
   url.searchParams.set("region", "pl");
   url.searchParams.set("sort", "newest");
   url.searchParams.set("salaryCurrency", "PLN");

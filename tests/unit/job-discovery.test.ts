@@ -5,14 +5,19 @@ import {
   externalJobToJobInput,
   filterKnownExternalJobs,
   newestFirst,
+  paginateExternalJobs,
   parseDiscoveryFilters,
   parseExternalJob,
 } from "../../src/features/job-discovery/domain.ts";
 import { normalizeJustJoinOffer } from "../../src/lib/job-sources/justjoin/normalize.ts";
 import {
   parseJustJoinDescriptionHtml,
-  parseJustJoinSearchHtml,
+  parseJustJoinSearchResponse,
 } from "../../src/lib/job-sources/justjoin/parse.ts";
+import {
+  buildJustJoinSearchUrl,
+  justJoinPagesToFetch,
+} from "../../src/lib/job-sources/justjoin/search.ts";
 import {
   mergeNoFluffJobs,
   normalizeNoFluffPosting,
@@ -24,6 +29,7 @@ import {
   noFluffPagesToFetch,
 } from "../../src/lib/job-sources/nofluffjobs/search.ts";
 import type { NormalizedExternalJob } from "../../src/lib/job-sources/types.ts";
+import { buildExternalJobBoardUrl } from "../../src/lib/job-sources/external-boards.ts";
 
 function job(externalId: string, postedAt?: string): NormalizedExternalJob {
   return {
@@ -67,19 +73,59 @@ test("normalizes a JustJoinIT offer without leaking source-specific fields", () 
   assert.equal(normalized.url, "https://justjoin.it/job-offer/synthetic-frontend-engineer");
 });
 
-test("extracts the current JustJoinIT SSR search payload and cursor metadata", () => {
-  const state = ["$", "component", null, { state: { queries: [{ state: { data: {
-    pages: [{
-      meta: { totalItems: 145, next: { cursor: 100, itemsCount: 100 } },
-      data: [{ guid: "one", slug: "one", title: "One", companyName: "Synthetic One" }],
-    }],
-  } } }] } }];
-  const flight = JSON.stringify([1, `19:${JSON.stringify(state)}\n`]);
-  const parsed = parseJustJoinSearchHtml(`<html><script>self.__next_f.push(${flight})</script></html>`);
-  assert.equal(parsed.totalItems, 145);
+test("builds and parses current JustJoinIT 100-job cursor pages", () => {
+  const url = buildJustJoinSearchUrl({
+    keywords: "React",
+    location: "Łódź",
+    workModes: ["remote", "onsite"],
+    categories: ["javascript"],
+    technologies: [],
+    seniorities: ["mid", "senior"],
+  }, 200);
+  assert.equal(url.pathname, "/api/candidate-api/offers");
+  assert.equal(url.searchParams.get("from"), "200");
+  assert.equal(url.searchParams.get("itemsCount"), "100");
+  assert.equal(url.searchParams.get("keywords"), "React");
+  assert.equal(url.searchParams.get("city"), "Łódź");
+  assert.deepEqual(url.searchParams.getAll("remoteWorkOptions"), ["remote", "office"]);
+  assert.deepEqual(url.searchParams.getAll("experienceLevels"), ["mid", "senior"]);
+  assert.equal(url.searchParams.get("sortBy"), "publishedAt");
+  assert.equal(url.searchParams.get("orderBy"), "descending");
+
+  const parsed = parseJustJoinSearchResponse({
+    data: [{ guid: "one", slug: "one", title: "One", companyName: "Synthetic One" }],
+    meta: { totalItems: 245, next: { cursor: 200, itemsCount: 100 } },
+  });
+  assert.equal(parsed.totalItems, 245);
   assert.equal(parsed.batchSize, 1);
   assert.equal(parsed.hasMore, true);
-  assert.equal(parsed.offers[0]?.guid, "one");
+  assert.equal(justJoinPagesToFetch(0), 1);
+  assert.equal(justJoinPagesToFetch(245), 3);
+  assert.equal(justJoinPagesToFetch(10_000), 5);
+});
+
+test("normalizes current JustJoinIT skill objects and per-unit salary", () => {
+  const normalized = normalizeJustJoinOffer({
+    guid: "current-contract",
+    slug: "current-contract",
+    title: "Frontend Engineer",
+    companyName: "Synthetic Labs",
+    workplaceType: "remote",
+    workingTime: "full_time",
+    requiredSkills: [{ name: "React", level: 3 }, { name: "TypeScript", level: 3 }],
+    employmentTypes: [{
+      from: 18_480,
+      fromPerUnit: 110,
+      to: 23_520,
+      toPerUnit: 140,
+      currency: "PLN",
+      currencySource: "original",
+      unit: "Hour",
+    }],
+  });
+  assert.ok(normalized);
+  assert.deepEqual(normalized.technologies, ["React", "TypeScript"]);
+  assert.deepEqual(normalized.salary, { min: 110, max: 140, currency: "PLN", unit: "Hour" });
 });
 
 test("filters saved, ignored, and repeated external identities", () => {
@@ -97,6 +143,19 @@ test("sorts by publication time newest first and leaves unknown dates last", () 
     job("newer", "2026-08-15T09:00:00.000Z"),
   ]);
   assert.deepEqual(sorted.map((item) => item.externalId), ["newer", "older", "unknown"]);
+});
+
+test("paginates discovery results at exactly 100 jobs per page", () => {
+  const jobs = Array.from({ length: 205 }, (_, index) => job(String(index + 1)));
+  const first = paginateExternalJobs(jobs, 1);
+  const second = paginateExternalJobs(jobs, 2);
+  const last = paginateExternalJobs(jobs, 99);
+  assert.equal(first.jobs.length, 100);
+  assert.equal(first.startIndex, 0);
+  assert.equal(second.jobs.length, 100);
+  assert.equal(second.startIndex, 100);
+  assert.equal(last.page, 3);
+  assert.equal(last.jobs.length, 5);
 });
 
 test("maps a bulk selection into existing saved-job inputs with stable identities", () => {
@@ -149,7 +208,7 @@ test("builds the current NoFluffJobs search request with real criteria and requi
   }, 3);
   assert.equal(request.url.pathname, "/api/search/posting");
   assert.equal(request.url.searchParams.get("page"), "3");
-  assert.equal(request.url.searchParams.get("limit"), "50");
+  assert.equal(request.url.searchParams.get("limit"), "100");
   assert.equal(request.url.searchParams.get("sort"), "newest");
   assert.equal(request.url.searchParams.get("salaryCurrency"), "PLN");
   assert.deepEqual(JSON.parse(request.body), {
@@ -167,7 +226,29 @@ test("builds the current NoFluffJobs search request with real criteria and requi
   assert.deepEqual(JSON.parse(remote.body).criteriaSearch.city, ["remote"]);
   assert.equal(noFluffPagesToFetch(0), 1);
   assert.equal(noFluffPagesToFetch(4), 4);
-  assert.equal(noFluffPagesToFetch(999), 10);
+  assert.equal(noFluffPagesToFetch(999), 5);
+});
+
+test("builds safe outbound searches for Poland and remote job boards", () => {
+  const search = { keywords: "React Engineer", location: "Warszawa", workModes: ["remote"] as const };
+  const linkedIn = buildExternalJobBoardUrl("linkedin", search);
+  assert.equal(linkedIn.hostname, "www.linkedin.com");
+  assert.equal(linkedIn.searchParams.get("keywords"), "React Engineer");
+  assert.equal(linkedIn.searchParams.get("location"), "Warszawa");
+  assert.equal(linkedIn.searchParams.get("f_WT"), "2");
+
+  const pracuj = buildExternalJobBoardUrl("pracuj", search);
+  assert.equal(pracuj.hostname, "www.pracuj.pl");
+  assert.equal(pracuj.pathname, "/praca/react-engineer;kw/warszawa;wp");
+
+  const dou = buildExternalJobBoardUrl("dou", search);
+  assert.equal(dou.hostname, "jobs.dou.ua");
+  assert.equal(dou.searchParams.get("search"), "React Engineer Warszawa");
+  assert.equal(dou.searchParams.has("remote"), true);
+
+  const weWorkRemotely = buildExternalJobBoardUrl("weworkremotely", search);
+  assert.equal(weWorkRemotely.hostname, "weworkremotely.com");
+  assert.equal(weWorkRemotely.searchParams.get("term"), "React Engineer Warszawa");
 });
 
 test("normalizes and merges NoFluffJobs multi-location postings by stable reference", () => {

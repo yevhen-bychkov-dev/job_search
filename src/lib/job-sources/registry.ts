@@ -9,9 +9,10 @@ const adapters = new Map<JobSourceId, JobSourceAdapter>([
   ["nofluffjobs", new NoFluffJobsAdapter()],
 ]);
 
-export const JOB_SOURCES = [...adapters.values()].map(({ id, name, filterOptions }) => ({
+export const JOB_SOURCES = [...adapters.values()].map(({ id, name, websiteUrl, filterOptions }) => ({
   id,
   name,
+  websiteUrl,
   filterOptions,
 }));
 

@@ -3,7 +3,9 @@ import type { ExternalSalary, NormalizedExternalJob } from "../types";
 
 export type JustJoinEmployment = {
   from?: number | null;
+  fromPerUnit?: number | null;
   to?: number | null;
+  toPerUnit?: number | null;
   currency?: string | null;
   currencySource?: string | null;
   type?: string | null;
@@ -47,10 +49,13 @@ function salary(value: unknown): ExternalSalary | undefined {
   if (!Array.isArray(value)) return undefined;
   const entries = value.filter((entry): entry is JustJoinEmployment => Boolean(entry) && typeof entry === "object");
   const original = entries.find((entry) => entry.currencySource === "original") ?? entries[0];
-  if (!original || (typeof original.from !== "number" && typeof original.to !== "number")) return undefined;
+  if (!original) return undefined;
+  const min = typeof original.fromPerUnit === "number" ? original.fromPerUnit : original.from;
+  const max = typeof original.toPerUnit === "number" ? original.toPerUnit : original.to;
+  if (typeof min !== "number" && typeof max !== "number") return undefined;
   return {
-    min: typeof original.from === "number" ? original.from : undefined,
-    max: typeof original.to === "number" ? original.to : undefined,
+    min: typeof min === "number" ? min : undefined,
+    max: typeof max === "number" ? max : undefined,
     currency: cleanString(original.currency, 8) || "PLN",
     unit: cleanString(original.unit, 20) || undefined,
   };
@@ -62,7 +67,12 @@ function technologies(...values: unknown[]): string[] {
   for (const value of values) {
     if (!Array.isArray(value)) continue;
     for (const item of value) {
-      const technology = cleanString(item, 60);
+      const technology = cleanString(
+        item && typeof item === "object" && "name" in item
+          ? (item as { name?: unknown }).name
+          : item,
+        60,
+      );
       const key = technology.toLocaleLowerCase("en");
       if (technology && !seen.has(key)) {
         seen.add(key);

@@ -37,7 +37,7 @@ export default async function ArchivedJobsPage({ searchParams }: PageProps<"/arc
       {jobs.length === 0 ? (
         <section className="empty-state"><span className="empty-icon">▱</span><h2>{search || status || workMode ? "No archived jobs match these filters" : "No archived jobs"}</h2><p>{search || status || workMode ? "Try a broader search or clear the filters." : "Jobs you archive from the active list will appear here."}</p><Link className="button button-secondary" href="/jobs">Back to jobs</Link></section>
       ) : (
-        <BulkJobsTable jobs={jobs.map(({ id, title, company, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }) => ({ id, title, company, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }))} archiveMode="archived" />
+        <BulkJobsTable jobs={jobs.map(({ id, title, company, source, externalSource, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }) => ({ id, title, company, source, externalSource, status: jobStatus, location, workMode: jobWorkMode, discoveredOn, archivedAt }))} archiveMode="archived" />
       )}
     </div>
   );

@@ -200,12 +200,27 @@ test("discover, inspect, bulk add, and permanently hide external jobs", async ({
   await page.getByRole("link", { name: "Discover", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Discover jobs" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "JustJoinIT" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "DOU" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "LinkedIn" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Pracuj.pl" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "We Work Remotely" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "LinkedIn" }).click();
+  await page.getByLabel("Keywords or technologies").fill("React Engineer");
+  await page.getByLabel("Location").fill("Poland");
+  await page.getByLabel("Remote").check();
+  await expect(page.getByRole("link", { name: "Open search on LinkedIn" })).toHaveAttribute(
+    "href",
+    /linkedin\.com\/jobs\/search\/.*keywords=React\+Engineer.*location=Poland.*f_WT=2/,
+  );
+  await page.getByRole("tab", { name: "JustJoinIT" }).click();
 
   await page.getByLabel("Keywords or technologies").fill("React");
   await expect(page.getByRole("heading", { name: "Search current vacancies" })).toBeVisible();
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Search results" })).toBeVisible();
   await expect(page.getByText("Frontend Platform Engineer", { exact: true })).toBeVisible();
+  await expect(page.getByTitle("Source: JustJoinIT").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Frontend Platform Engineer", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -220,7 +235,7 @@ test("discover, inspect, bulk add, and permanently hide external jobs", async ({
   await page.getByLabel("Select all displayed jobs").check();
   await page.getByRole("button", { name: "Add selected (2)" }).click();
   await expect(page.getByText("Added 2 jobs.")).toBeVisible();
-  await expect(page.getByText("No new jobs found")).toBeVisible();
+  await expect(page.getByText("No unreviewed jobs")).toBeVisible();
 
   await page.getByRole("link", { name: "Jobs", exact: true }).click();
   await expect(page.getByRole("link", { name: /Frontend Platform Engineer/ })).toBeVisible();
@@ -236,7 +251,7 @@ test("discover, inspect, bulk add, and permanently hide external jobs", async ({
   await page.getByRole("link", { name: "Discover", exact: true }).click();
   await page.getByLabel("Keywords or technologies").fill("React");
   await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(page.getByText("No new jobs found")).toBeVisible();
+  await expect(page.getByText("No unreviewed jobs")).toBeVisible();
   await page.getByLabel("Keywords or technologies").fill("");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("button", { name: "Software Engineer", exact: true })).toBeVisible();
@@ -244,7 +259,7 @@ test("discover, inspect, bulk add, and permanently hide external jobs", async ({
   await expect(page.getByText("Vacancy hidden. It will not appear in future searches.")).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(page.getByText("No new jobs found")).toBeVisible();
+  await expect(page.getByText("No unreviewed jobs")).toBeVisible();
 });
 
 test("NoFluffJobs keeps independent filters, results, selection, and import state", async ({ page }) => {
@@ -277,7 +292,7 @@ test("NoFluffJobs keeps independent filters, results, selection, and import stat
   await expect(page.getByLabel("Technology")).toHaveValue("react");
   await page.getByRole("button", { name: "Add selected (1)" }).click();
   await expect(page.getByText("Added 1 job.")).toBeVisible();
-  await expect(page.getByText("No new jobs found")).toBeVisible();
+  await expect(page.getByText("No unreviewed jobs")).toBeVisible();
 
   await page.getByRole("link", { name: "Jobs", exact: true }).click();
   await expect(page.getByRole("link", { name: /Senior Frontend Engineer/ })).toBeVisible();

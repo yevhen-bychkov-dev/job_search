@@ -9,7 +9,12 @@ import {
   useTransition,
 } from "react";
 
+import { SourceBadge } from "@/components/ui/source-badge";
 import { WORK_MODE_LABELS } from "@/features/jobs/types";
+import type {
+  ExternalJobBoardDefinition,
+  ExternalJobBoardId,
+} from "@/lib/job-sources/external-boards";
 import type {
   JobSearchFilters,
   JobSourceDefinition,
@@ -23,10 +28,11 @@ import {
   loadExternalJobDetailsAction,
   searchExternalJobsAction,
 } from "./actions";
-import { formatExternalSalary } from "./domain";
+import { DISCOVERY_PAGE_SIZE, formatExternalSalary, paginateExternalJobs } from "./domain";
+import { ExternalBoardSearch } from "./external-board-search";
 import { SourceSearchForm } from "./source-search-form";
 
-const PAGE_SIZE = 25;
+const MAX_SELECTED_JOBS = DISCOVERY_PAGE_SIZE;
 
 function emptyFilters(): JobSearchFilters {
   return {
@@ -42,7 +48,7 @@ function emptyFilters(): JobSearchFilters {
 type SourceSearchState = {
   jobs: NormalizedExternalJob[];
   selectedIds: Set<string>;
-  visibleCount: number;
+  page: number;
   hasSearched: boolean;
   searchError: string;
   sourceInfo: { total: number; batchLimit: number; hasMore: boolean };
@@ -52,7 +58,7 @@ function emptySearchState(): SourceSearchState {
   return {
     jobs: [],
     selectedIds: new Set(),
-    visibleCount: PAGE_SIZE,
+    page: 1,
     hasSearched: false,
     searchError: "",
     sourceInfo: { total: 0, batchLimit: 0, hasMore: false },
@@ -150,7 +156,7 @@ function DiscoveryDrawer({
       >
         <header className="discovery-drawer-header">
           <div>
-            <span className="eyebrow">{job.sourceName}</span>
+            <SourceBadge source={job.sourceName} externalSource={job.source} showLabel />
             <h2 id="discovery-drawer-title">{job.title}</h2>
             <p>{job.company}</p>
           </div>
@@ -163,7 +169,7 @@ function DiscoveryDrawer({
             <div><dt>Work mode</dt><dd>{WORK_MODE_LABELS[job.workMode]}</dd></div>
             <div><dt>Published</dt><dd>{postedDate(job.postedAt)}</dd></div>
             <div><dt>Salary</dt><dd>{formatExternalSalary(job.salary) || "Not disclosed"}</dd></div>
-            <div><dt>Source</dt><dd>{job.sourceName}</dd></div>
+            <div><dt>Source</dt><dd><SourceBadge source={job.sourceName} externalSource={job.source} showLabel /></dd></div>
           </dl>
 
           {job.technologies.length > 0 && (
@@ -191,8 +197,16 @@ function DiscoveryDrawer({
   );
 }
 
-export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSourceDefinition> }) {
-  const [activeSource, setActiveSource] = useState<JobSourceId>(sources[0]?.id ?? "justjoinit");
+type DiscoveryTabId = JobSourceId | ExternalJobBoardId;
+
+export function DiscoveryWorkspace({
+  sources,
+  externalBoards,
+}: {
+  sources: ReadonlyArray<JobSourceDefinition>;
+  externalBoards: ReadonlyArray<ExternalJobBoardDefinition>;
+}) {
+  const [activeTab, setActiveTab] = useState<DiscoveryTabId>(sources[0]?.id ?? "justjoinit");
   const [filtersBySource, setFiltersBySource] = useState<Record<JobSourceId, JobSearchFilters>>({
     justjoinit: emptyFilters(),
     nofluffjobs: emptyFilters(),
@@ -208,15 +222,22 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
   const [, startSearch] = useTransition();
   const [isBulkAdding, startBulkAdd] = useTransition();
   const selectAllRef = useRef<HTMLInputElement>(null);
-  const source = sources.find((item) => item.id === activeSource) ?? sources[0];
-  const filters = filtersBySource[activeSource];
-  const searchState = searchBySource[activeSource];
-  const { jobs, selectedIds, visibleCount, hasSearched, searchError, sourceInfo } = searchState;
-  const visibleJobs = jobs.slice(0, visibleCount);
+  const source = sources.find((item) => item.id === activeTab);
+  const externalBoard = externalBoards.find((item) => item.id === activeTab);
+  const activeSourceId = source?.id ?? sources[0]?.id ?? "justjoinit";
+  const filters = filtersBySource[activeSourceId];
+  const searchState = searchBySource[activeSourceId];
+  const { jobs, selectedIds, page, hasSearched, searchError, sourceInfo } = searchState;
+  const {
+    jobs: visibleJobs,
+    page: currentPage,
+    pageCount,
+    startIndex: pageStart,
+  } = paginateExternalJobs(jobs, page);
   const visibleIds = visibleJobs.map((job) => job.externalId);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   const someVisibleSelected = visibleIds.some((id) => selectedIds.has(id));
-  const isSearching = searchingSources.has(activeSource);
+  const isSearching = searchingSources.has(activeSourceId);
 
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = someVisibleSelected && !allVisibleSelected;
@@ -225,7 +246,7 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
   function updateFilters(patch: Partial<JobSearchFilters>) {
     setFiltersBySource((current) => ({
       ...current,
-      [activeSource]: { ...current[activeSource], ...patch },
+      [activeSourceId]: { ...current[activeSourceId], ...patch },
     }));
   }
 
@@ -238,7 +259,8 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
 
   function runSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const submittedSource = activeSource;
+    if (!source) return;
+    const submittedSource = source.id;
     const submittedFilters = filtersBySource[submittedSource];
     setNotice(null);
     setSearchingSources((current) => new Set(current).add(submittedSource));
@@ -250,7 +272,7 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
           ...current,
           jobs: result.status === "success" ? result.jobs : [],
           selectedIds: new Set(),
-          visibleCount: PAGE_SIZE,
+          page: 1,
           hasSearched: true,
           searchError: result.status === "error" ? result.message : "",
           sourceInfo: result.status === "success"
@@ -269,7 +291,11 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
   }
 
   function toggleSelected(externalId: string) {
-    updateSearchState(activeSource, (current) => {
+    if (!selectedIds.has(externalId) && selectedIds.size >= MAX_SELECTED_JOBS) {
+      setNotice({ kind: "error", message: `Select at most ${MAX_SELECTED_JOBS} vacancies at a time.` });
+      return;
+    }
+    updateSearchState(activeSourceId, (current) => {
       const next = new Set(current.selectedIds);
       if (next.has(externalId)) next.delete(externalId); else next.add(externalId);
       return { ...current, selectedIds: next };
@@ -277,10 +303,15 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
   }
 
   function toggleSelectAll() {
-    updateSearchState(activeSource, (current) => {
+    const additions = visibleIds.filter((id) => !selectedIds.has(id));
+    const available = Math.max(0, MAX_SELECTED_JOBS - selectedIds.size);
+    if (!allVisibleSelected && additions.length > available) {
+      setNotice({ kind: "error", message: `Selected the first ${MAX_SELECTED_JOBS} vacancies. Add them before selecting more.` });
+    }
+    updateSearchState(activeSourceId, (current) => {
       const next = new Set(current.selectedIds);
       if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
-      else visibleIds.forEach((id) => next.add(id));
+      else additions.slice(0, available).forEach((id) => next.add(id));
       return { ...current, selectedIds: next };
     });
   }
@@ -347,8 +378,6 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
     setDrawerJob(job);
   }
 
-  if (!source) return null;
-
   return (
     <div className="stack discovery-workspace">
       <div className="source-tabs" role="tablist" aria-label="Job sources">
@@ -357,17 +386,34 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
             key={source.id}
             type="button"
             role="tab"
-            aria-selected={activeSource === source.id}
-            className={activeSource === source.id ? "source-tab active" : "source-tab"}
+            aria-selected={activeTab === source.id}
+            className={activeTab === source.id ? "source-tab active" : "source-tab"}
             onClick={() => {
-              setActiveSource(source.id);
+              setActiveTab(source.id);
               setDrawerJob(null);
               setNotice(null);
             }}
           >{source.name}</button>
         ))}
+        {externalBoards.map((board) => (
+          <button
+            key={board.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === board.id}
+            className={activeTab === board.id ? "source-tab active" : "source-tab"}
+            onClick={() => {
+              setActiveTab(board.id);
+              setDrawerJob(null);
+              setNotice(null);
+            }}
+          >{board.name}</button>
+        ))}
       </div>
 
+      {externalBoard && <ExternalBoardSearch key={externalBoard.id} board={externalBoard} />}
+
+      {source && <>
       <SourceSearchForm
         source={source}
         filters={filters}
@@ -380,13 +426,13 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
       {searchError && <section className="empty-state compact" role="alert"><span className="empty-icon">!</span><h2>Source unavailable</h2><p>{searchError}</p></section>}
       {!hasSearched && !isSearching && <section className="empty-state"><span className="empty-icon">⌕</span><h2>Search current vacancies</h2><p>Choose filters, then select Search. Filters never send requests automatically.</p></section>}
       {isSearching && <div className="page-loading" role="status"><span className="spinner" />Searching {source.name}…</div>}
-      {hasSearched && !isSearching && !searchError && jobs.length === 0 && <section className="empty-state"><span className="empty-icon">0</span><h2>No new jobs found</h2><p>Try broader filters. Jobs already saved or hidden are removed automatically.</p></section>}
+      {hasSearched && !isSearching && !searchError && jobs.length === 0 && <section className="empty-state"><span className="empty-icon">0</span><h2>{sourceInfo.total > 0 ? "No unreviewed jobs" : "No matching jobs"}</h2><p>{sourceInfo.total > 0 ? `${source.name} reported ${sourceInfo.total} matches, but the fetched vacancies are already saved or hidden.` : "Try broader filters or continue on the source website."}</p><a className="button button-secondary" href={source.websiteUrl} target="_blank" rel="noreferrer">Browse {source.name}</a></section>}
 
       {jobs.length > 0 && !isSearching && (
-        <section className="stack" aria-labelledby={`discovery-results-heading-${activeSource}`}>
+        <section className="stack" aria-labelledby={`discovery-results-heading-${source.id}`}>
           <div className="discovery-results-toolbar">
-            <div><h2 id={`discovery-results-heading-${activeSource}`}>Search results</h2><p>{jobs.length} new of {sourceInfo.total} source matches</p></div>
-            <button className="button button-primary" type="button" disabled={selectedIds.size === 0 || isBulkAdding} onClick={addSelected}>{isBulkAdding ? "Adding…" : `Add selected (${selectedIds.size})`}</button>
+            <div><h2 id={`discovery-results-heading-${source.id}`}>Search results</h2><p>{jobs.length} unreviewed of {sourceInfo.total} source matches</p></div>
+            <div className="button-row"><a className="button button-secondary" href={source.websiteUrl} target="_blank" rel="noreferrer">Browse {source.name}</a><button className="button button-primary" type="button" disabled={selectedIds.size === 0 || isBulkAdding} onClick={addSelected}>{isBulkAdding ? "Adding…" : `Add selected (${selectedIds.size})`}</button></div>
           </div>
           {sourceInfo.hasMore && <p className="alert discovery-limit-note">{source.name} returned its newest {sourceInfo.batchLimit} matches. Refine filters to reach older vacancies.</p>}
           <div className="card table-wrap">
@@ -398,19 +444,23 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
               <tbody>{visibleJobs.map((job) => {
                 const busy = busyIds.has(jobKey(job));
                 return <tr key={`${job.source}:${job.externalId}`} className="discovery-row" onClick={(event) => rowClick(event, job)}>
-                  <td className="selection-cell"><input type="checkbox" aria-label={`Select ${job.title} at ${job.company}`} checked={selectedIds.has(job.externalId)} onChange={() => toggleSelected(job.externalId)} /></td>
+                  <td className="selection-cell"><input type="checkbox" aria-label={`Select ${job.title} at ${job.company}`} checked={selectedIds.has(job.externalId)} disabled={!selectedIds.has(job.externalId) && selectedIds.size >= MAX_SELECTED_JOBS} onChange={() => toggleSelected(job.externalId)} /></td>
                   <td><button className="discovery-title-button" type="button" onClick={() => setDrawerJob(job)}>{job.title}</button></td>
                   <td>{job.company}</td><td>{job.location || "—"}</td><td>{WORK_MODE_LABELS[job.workMode]}</td>
                   <td><span className="technology-cell" title={job.technologies.join(", ")}>{job.technologies.slice(0, 3).join(", ") || "—"}{job.technologies.length > 3 ? ` +${job.technologies.length - 3}` : ""}</span></td>
-                  <td>{job.sourceName}</td>
+                  <td><SourceBadge source={job.sourceName} externalSource={job.source} /></td>
                   <td><time dateTime={job.postedAt}>{postedDate(job.postedAt)}</time></td>
                   <td><div className="discovery-row-actions"><button type="button" className="text-button" disabled={busy} onClick={() => void addJobs([job])}>Add</button><button type="button" className="text-button danger" disabled={busy} onClick={() => void hideJob(job)}>Hide</button></div></td>
                 </tr>;
               })}</tbody>
             </table>
-            <p className="table-note">Showing {visibleJobs.length} of {jobs.length} new vacancies, newest first.</p>
+            <p className="table-note">Showing {pageStart + 1}–{pageStart + visibleJobs.length} of {jobs.length} unreviewed vacancies, newest first.</p>
           </div>
-          {visibleCount < jobs.length && <button className="button button-secondary load-more-button" type="button" onClick={() => updateSearchState(activeSource, (current) => ({ ...current, visibleCount: current.visibleCount + PAGE_SIZE }))}>Load more</button>}
+          {pageCount > 1 && <nav className="pagination" aria-label={`${source.name} result pages`}>
+            <button className="button button-secondary button-small" type="button" disabled={currentPage === 1} onClick={() => updateSearchState(source.id, (current) => ({ ...current, page: Math.max(1, currentPage - 1) }))}>Previous</button>
+            {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <button key={pageNumber} className={pageNumber === currentPage ? "pagination-page active" : "pagination-page"} type="button" aria-current={pageNumber === currentPage ? "page" : undefined} aria-label={`Page ${pageNumber}`} onClick={() => updateSearchState(source.id, (current) => ({ ...current, page: pageNumber }))}>{pageNumber}</button>)}
+            <button className="button button-secondary button-small" type="button" disabled={currentPage === pageCount} onClick={() => updateSearchState(source.id, (current) => ({ ...current, page: Math.min(pageCount, currentPage + 1) }))}>Next</button>
+          </nav>}
         </section>
       )}
 
@@ -428,6 +478,7 @@ export function DiscoveryWorkspace({ sources }: { sources: ReadonlyArray<JobSour
           setDrawerJob((current) => current ? { ...current, description } : current);
         }}
       />}
+      </>}
     </div>
   );
 }

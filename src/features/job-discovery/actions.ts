@@ -79,8 +79,8 @@ export async function addExternalJobsAction(rawJobs: unknown): Promise<
   | { status: "error"; message: string }
 > {
   const identity = await requireIdentity();
-  if (!Array.isArray(rawJobs) || rawJobs.length === 0 || rawJobs.length > 50) {
-    return { status: "error", message: "Select between 1 and 50 vacancies." };
+  if (!Array.isArray(rawJobs) || rawJobs.length === 0 || rawJobs.length > 100) {
+    return { status: "error", message: "Select between 1 and 100 vacancies." };
   }
   const jobs = rawJobs.map(parseExternalJob);
   if (jobs.some((job) => !job)) return { status: "error", message: "One or more vacancies are invalid. Search again and retry." };
