@@ -1,6 +1,6 @@
 import type { EmploymentType, WorkMode } from "@/features/jobs/types";
 
-export type JobSourceId = "justjoinit" | "nofluffjobs";
+export type JobSourceId = "justjoinit" | "nofluffjobs" | "dou" | "weworkremotely";
 
 export type JobSearchFilters = {
   keywords: string;
@@ -26,6 +26,7 @@ export type JobSourceDefinition = {
   id: JobSourceId;
   name: string;
   websiteUrl: string;
+  supportedWorkModes: readonly WorkMode[];
   filterOptions: JobSourceFilterOptions;
 };
 
@@ -63,6 +64,7 @@ export interface JobSourceAdapter {
   readonly id: JobSourceId;
   readonly name: string;
   readonly websiteUrl: string;
+  readonly supportedWorkModes: readonly WorkMode[];
   readonly filterOptions: JobSourceFilterOptions;
   searchJobs(filters: JobSearchFilters): Promise<ExternalJobSearchResult>;
   getJobDetails(job: Pick<NormalizedExternalJob, "externalId" | "url">): Promise<{ description: string }>;

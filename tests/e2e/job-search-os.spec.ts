@@ -201,19 +201,9 @@ test("discover, inspect, bulk add, and permanently hide external jobs", async ({
   await expect(page.getByRole("heading", { name: "Discover jobs" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "JustJoinIT" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab", { name: "DOU" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "LinkedIn" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Pracuj.pl" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "We Work Remotely" })).toBeVisible();
-
-  await page.getByRole("tab", { name: "LinkedIn" }).click();
-  await page.getByLabel("Keywords or technologies").fill("React Engineer");
-  await page.getByLabel("Location").fill("Poland");
-  await page.getByLabel("Remote").check();
-  await expect(page.getByRole("link", { name: "Open search on LinkedIn" })).toHaveAttribute(
-    "href",
-    /linkedin\.com\/jobs\/search\/.*keywords=React\+Engineer.*location=Poland.*f_WT=2/,
-  );
-  await page.getByRole("tab", { name: "JustJoinIT" }).click();
+  await expect(page.getByRole("tab", { name: "LinkedIn" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Pracuj.pl" })).toHaveCount(0);
 
   await page.getByLabel("Keywords or technologies").fill("React");
   await expect(page.getByRole("heading", { name: "Search current vacancies" })).toBeVisible();
@@ -296,6 +286,44 @@ test("NoFluffJobs keeps independent filters, results, selection, and import stat
 
   await page.getByRole("link", { name: "Jobs", exact: true }).click();
   await expect(page.getByRole("link", { name: /Senior Frontend Engineer/ })).toBeVisible();
+});
+
+test("DOU and We Work Remotely download, review, and add vacancies", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Discover", exact: true }).click();
+
+  await page.getByRole("tab", { name: "DOU" }).click();
+  await expect(page.getByRole("tab", { name: "DOU" })).toHaveAttribute("aria-selected", "true");
+  await page.getByLabel("Keywords or technologies").fill("React");
+  await page.getByLabel("Remote").check();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Senior React Engineer", exact: true })).toBeVisible();
+  await expect(page.getByTitle("Source: DOU").first()).toBeVisible();
+  await page.getByRole("button", { name: "Senior React Engineer", exact: true }).click();
+  await expect(page.getByText("Synthetic DOU vacancy used only by isolated end-to-end tests.")).toBeVisible();
+  await page.getByRole("button", { name: "Add job", exact: true }).click();
+  await expect(page.getByText("Added 1 job.")).toBeVisible();
+
+  await page.getByRole("tab", { name: "We Work Remotely" }).click();
+  await expect(page.getByRole("tab", { name: "We Work Remotely" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("checkbox", { name: "Remote" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Hybrid" })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: "On-site" })).toHaveCount(0);
+  await page.getByLabel("Keywords or technologies").fill("TypeScript");
+  await page.getByLabel("Location").fill("European Union");
+  await page.getByLabel("Category").selectOption("front-end");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remote TypeScript Engineer", exact: true })).toBeVisible();
+  await expect(page.getByTitle("Source: We Work Remotely").first()).toBeVisible();
+  await page.getByLabel("Select Remote TypeScript Engineer at Synthetic Global Product Co").check();
+  await page.getByRole("button", { name: "Add selected (1)" }).click();
+  await expect(page.getByText("Added 1 job.")).toBeVisible();
+
+  await page.getByRole("link", { name: "Jobs", exact: true }).click();
+  await expect(page.getByRole("link", { name: /Senior React Engineer/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Remote TypeScript Engineer/ })).toBeVisible();
+  await expect(page.getByTitle("Source: DOU")).toBeVisible();
+  await expect(page.getByTitle("Source: We Work Remotely")).toBeVisible();
 });
 
 test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
@@ -471,10 +499,12 @@ test("major screens render cleanly at desktop and narrow widths", async ({ page 
   await signIn(page);
 
   await page.goto("/jobs/new");
-  await page.getByLabel("Job title").fill("Visual QA Engineer");
-  await page.getByLabel("Company").fill("Synthetic Visual Co");
+  const visualJobTitle = "Senior Frontend Platform Engineer (TypeScript / React / Azure / Accessibility)";
+  await page.getByLabel("Job title").fill(visualJobTitle);
+  await page.getByLabel("Company").fill("Synthetic International Product and Banking Group");
+  await page.getByLabel("Location").fill("Kraków, Warszawa, Wrocław, Poznań, Gdańsk, Łódź, Katowice");
   await page.getByRole("button", { name: "Create job" }).click();
-  await expect(page.getByRole("heading", { name: "Visual QA Engineer" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: visualJobTitle })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("job-detail-desktop.png"), fullPage: true });
 
   const screens = [
@@ -491,6 +521,13 @@ test("major screens render cleanly at desktop and narrow widths", async ({ page 
   for (const [slug, path, heading] of screens) {
     await page.goto(path);
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    const documentScroll = await page.evaluate(() => {
+      window.scrollTo({ left: 100_000, top: 0 });
+      const position = window.scrollX;
+      window.scrollTo({ left: 0, top: 0 });
+      return position;
+    });
+    expect(documentScroll, `${path} should not overflow the desktop viewport`).toBeLessThanOrEqual(1);
     await page.screenshot({ path: testInfo.outputPath(`${slug}-desktop.png`), fullPage: true });
   }
 

@@ -1,6 +1,5 @@
 import { PageHeader } from "@/components/ui/page-header";
 import { DiscoveryWorkspace } from "@/features/job-discovery/discovery-workspace";
-import { EXTERNAL_JOB_BOARDS } from "@/lib/job-sources/external-boards";
 import { JOB_SOURCES } from "@/lib/job-sources/registry";
 
 export default function DiscoverJobsPage() {
@@ -11,7 +10,7 @@ export default function DiscoverJobsPage() {
         title="Discover jobs"
         description="Search current vacancies, review details, and add only the opportunities you want to track."
       />
-      <DiscoveryWorkspace sources={JOB_SOURCES} externalBoards={EXTERNAL_JOB_BOARDS} />
+      <DiscoveryWorkspace sources={JOB_SOURCES} />
     </div>
   );
 }

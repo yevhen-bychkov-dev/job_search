@@ -28,7 +28,8 @@ function filtersSupportedBySource(
 ): boolean {
   const allowed = (key: "categories" | "technologies" | "seniorities") =>
     new Set(source.filterOptions[key].map((option) => option.value));
-  return filters.categories.every((value) => allowed("categories").has(value))
+  return filters.workModes.every((value) => source.supportedWorkModes.includes(value))
+    && filters.categories.every((value) => allowed("categories").has(value))
     && filters.technologies.every((value) => allowed("technologies").has(value))
     && filters.seniorities.every((value) => allowed("seniorities").has(value));
 }

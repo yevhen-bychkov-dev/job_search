@@ -100,7 +100,7 @@ export function SourceSearchForm({
       <div className="discovery-filter-options">
         <fieldset className="discovery-mode-fieldset">
           <legend>Work mode</legend>
-          {(["remote", "hybrid", "onsite"] as const).map((mode) => (
+          {source.supportedWorkModes.map((mode) => (
             <label key={mode}>
               <input type="checkbox" checked={filters.workModes.includes(mode)} onChange={() => toggleMode(mode)} />
               {WORK_MODE_LABELS[mode]}

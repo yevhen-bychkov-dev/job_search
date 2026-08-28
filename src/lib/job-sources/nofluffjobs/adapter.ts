@@ -111,6 +111,7 @@ export class NoFluffJobsAdapter implements JobSourceAdapter {
   readonly id = "nofluffjobs" as const;
   readonly name = "NoFluffJobs";
   readonly websiteUrl = "https://nofluffjobs.com/pl";
+  readonly supportedWorkModes = ["remote", "hybrid", "onsite"] as const;
   readonly filterOptions = NO_FLUFF_FILTER_OPTIONS;
 
   async searchJobs(filters: JobSearchFilters): Promise<ExternalJobSearchResult> {

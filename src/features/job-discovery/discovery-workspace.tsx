@@ -12,10 +12,6 @@ import {
 import { SourceBadge } from "@/components/ui/source-badge";
 import { WORK_MODE_LABELS } from "@/features/jobs/types";
 import type {
-  ExternalJobBoardDefinition,
-  ExternalJobBoardId,
-} from "@/lib/job-sources/external-boards";
-import type {
   JobSearchFilters,
   JobSourceDefinition,
   JobSourceId,
@@ -29,7 +25,6 @@ import {
   searchExternalJobsAction,
 } from "./actions";
 import { DISCOVERY_PAGE_SIZE, formatExternalSalary, paginateExternalJobs } from "./domain";
-import { ExternalBoardSearch } from "./external-board-search";
 import { SourceSearchForm } from "./source-search-form";
 
 const MAX_SELECTED_JOBS = DISCOVERY_PAGE_SIZE;
@@ -197,23 +192,23 @@ function DiscoveryDrawer({
   );
 }
 
-type DiscoveryTabId = JobSourceId | ExternalJobBoardId;
-
 export function DiscoveryWorkspace({
   sources,
-  externalBoards,
 }: {
   sources: ReadonlyArray<JobSourceDefinition>;
-  externalBoards: ReadonlyArray<ExternalJobBoardDefinition>;
 }) {
-  const [activeTab, setActiveTab] = useState<DiscoveryTabId>(sources[0]?.id ?? "justjoinit");
+  const [activeTab, setActiveTab] = useState<JobSourceId>(sources[0]?.id ?? "justjoinit");
   const [filtersBySource, setFiltersBySource] = useState<Record<JobSourceId, JobSearchFilters>>({
     justjoinit: emptyFilters(),
     nofluffjobs: emptyFilters(),
+    dou: emptyFilters(),
+    weworkremotely: emptyFilters(),
   });
   const [searchBySource, setSearchBySource] = useState<Record<JobSourceId, SourceSearchState>>({
     justjoinit: emptySearchState(),
     nofluffjobs: emptySearchState(),
+    dou: emptySearchState(),
+    weworkremotely: emptySearchState(),
   });
   const [drawerJob, setDrawerJob] = useState<NormalizedExternalJob | null>(null);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -223,7 +218,6 @@ export function DiscoveryWorkspace({
   const [isBulkAdding, startBulkAdd] = useTransition();
   const selectAllRef = useRef<HTMLInputElement>(null);
   const source = sources.find((item) => item.id === activeTab);
-  const externalBoard = externalBoards.find((item) => item.id === activeTab);
   const activeSourceId = source?.id ?? sources[0]?.id ?? "justjoinit";
   const filters = filtersBySource[activeSourceId];
   const searchState = searchBySource[activeSourceId];
@@ -395,23 +389,7 @@ export function DiscoveryWorkspace({
             }}
           >{source.name}</button>
         ))}
-        {externalBoards.map((board) => (
-          <button
-            key={board.id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === board.id}
-            className={activeTab === board.id ? "source-tab active" : "source-tab"}
-            onClick={() => {
-              setActiveTab(board.id);
-              setDrawerJob(null);
-              setNotice(null);
-            }}
-          >{board.name}</button>
-        ))}
       </div>
-
-      {externalBoard && <ExternalBoardSearch key={externalBoard.id} board={externalBoard} />}
 
       {source && <>
       <SourceSearchForm

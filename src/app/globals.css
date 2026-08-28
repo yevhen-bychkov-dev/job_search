@@ -182,6 +182,13 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: #fbfcff; }
 .selection-column { width: 48px; text-align: center; }
 .selection-column input { width: 16px; height: 16px; accent-color: var(--primary); }
+.jobs-table { table-layout: fixed; white-space: normal; }
+.jobs-table th:nth-child(2) { width: 36%; }
+.jobs-table th:nth-child(3) { width: 106px; }
+.jobs-table th:nth-child(5) { width: 100px; }
+.jobs-table th:nth-child(6) { width: 118px; }
+.jobs-table th:nth-child(7) { width: 72px; }
+.jobs-table td:nth-child(2), .jobs-table td:nth-child(4) { overflow-wrap: anywhere; }
 .job-link { display: grid; gap: 2px; }
 .job-link strong { color: var(--ink); font-size: .9rem; }
 .job-link span { color: var(--muted); font-size: .78rem; }
@@ -375,17 +382,9 @@ tbody tr:hover { background: #fbfcff; }
 .source-badge-linkedin { color: #175cd3; border-color: #b9e6fe; background: #f0f9ff; }
 .source-badge-pracuj { color: #b42318; border-color: #fecdca; background: #fef3f2; }
 .source-badge-wwr { color: #5925dc; border-color: #d9d6fe; background: #f4f3ff; }
-.job-list-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.job-list-identity { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; }
+.job-list-identity .source-identity { margin-top: 1px; }
 .job-list-identity .job-link { min-width: 0; }
-
-.external-board-panel { display: grid; gap: 22px; }
-.external-board-heading { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 14px; }
-.external-board-heading h2 { margin: 3px 0 5px; font-size: 1.2rem; }
-.external-board-heading p { margin: 0; color: var(--muted); }
-.external-board-filter-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
-.external-board-actions { display: flex; align-items: end; gap: 16px; }
-.external-board-actions .button { margin-left: auto; }
-.external-board-note { margin: -8px 0 0; color: var(--muted); font-size: .78rem; }
 
 body.drawer-open { overflow: hidden; }
 .discovery-drawer-layer { position: fixed; z-index: 100; inset: 0; }
@@ -422,6 +421,7 @@ body.drawer-open { overflow: hidden; }
   .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .filter-bar { grid-template-columns: minmax(200px, 1fr) 160px 160px auto; }
   .filter-bar .text-link { grid-column: 1 / -1; }
+  .jobs-table th:nth-child(6), .jobs-table td:nth-child(6) { display: none; }
   .discovery-filter-grid { grid-template-columns: 1fr 1fr; }
   .discovery-filter-options { align-items: stretch; flex-direction: column; }
   .discovery-search-button { justify-self: end; }
@@ -466,7 +466,6 @@ body.drawer-open { overflow: hidden; }
   .bulk-selection-count { width: 100%; }
   .bulk-status-field { width: 100%; margin-left: 0; }
   .bulk-toolbar .button { flex: 1; }
-  .jobs-table { table-layout: fixed; white-space: normal; }
   .jobs-table th:nth-child(2) { width: 68%; }
   .jobs-table th:nth-child(n + 4), .jobs-table td:nth-child(n + 4) { display: none; }
   .detail-header .button-row { width: 100%; }
@@ -489,9 +488,6 @@ body.drawer-open { overflow: hidden; }
   .discovery-results-toolbar { align-items: stretch; flex-direction: column; }
   .discovery-results-toolbar .button-row { display: grid; grid-template-columns: 1fr; }
   .discovery-results-toolbar .button { width: 100%; }
-  .external-board-filter-grid { grid-template-columns: 1fr; }
-  .external-board-actions { align-items: stretch; flex-direction: column; }
-  .external-board-actions .button { width: 100%; margin-left: 0; }
   .discovery-drawer { width: 100%; min-width: 0; }
   .discovery-drawer-header, .discovery-drawer-body { padding-inline: 18px; }
   .discovery-drawer-footer { display: grid; grid-template-columns: 1fr 1fr; padding-inline: 18px; }

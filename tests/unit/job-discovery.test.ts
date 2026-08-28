@@ -28,8 +28,11 @@ import {
   buildNoFluffSearchRequest,
   noFluffPagesToFetch,
 } from "../../src/lib/job-sources/nofluffjobs/search.ts";
-import type { NormalizedExternalJob } from "../../src/lib/job-sources/types.ts";
-import { buildExternalJobBoardUrl } from "../../src/lib/job-sources/external-boards.ts";
+import { normalizeDouFeed } from "../../src/lib/job-sources/dou/normalize.ts";
+import { buildDouFeedUrl } from "../../src/lib/job-sources/dou/search.ts";
+import type { JobSearchFilters, NormalizedExternalJob } from "../../src/lib/job-sources/types.ts";
+import { normalizeWeWorkRemotelyFeed } from "../../src/lib/job-sources/weworkremotely/normalize.ts";
+import { buildWeWorkRemotelyFeedUrl } from "../../src/lib/job-sources/weworkremotely/search.ts";
 
 function job(externalId: string, postedAt?: string): NormalizedExternalJob {
   return {
@@ -229,26 +232,67 @@ test("builds the current NoFluffJobs search request with real criteria and requi
   assert.equal(noFluffPagesToFetch(999), 5);
 });
 
-test("builds safe outbound searches for Poland and remote job boards", () => {
-  const search = { keywords: "React Engineer", location: "Warszawa", workModes: ["remote"] as const };
-  const linkedIn = buildExternalJobBoardUrl("linkedin", search);
-  assert.equal(linkedIn.hostname, "www.linkedin.com");
-  assert.equal(linkedIn.searchParams.get("keywords"), "React Engineer");
-  assert.equal(linkedIn.searchParams.get("location"), "Warszawa");
-  assert.equal(linkedIn.searchParams.get("f_WT"), "2");
+test("builds and normalizes the official DOU vacancy feed", () => {
+  const filters: JobSearchFilters = {
+    keywords: "React", location: "Warszawa", workModes: ["remote"],
+    categories: ["Front End"], technologies: [], seniorities: [],
+  };
+  const url = buildDouFeedUrl(filters);
+  assert.equal(url.hostname, "jobs.dou.ua");
+  assert.equal(url.pathname, "/vacancies/feeds/");
+  assert.equal(url.searchParams.get("search"), "React Warszawa");
+  assert.equal(url.searchParams.get("category"), "Front End");
 
-  const pracuj = buildExternalJobBoardUrl("pracuj", search);
-  assert.equal(pracuj.hostname, "www.pracuj.pl");
-  assert.equal(pracuj.pathname, "/praca/react-engineer;kw/warszawa;wp");
+  const jobs = normalizeDouFeed(`<?xml version="1.0"?><rss><channel><item>
+    <title>Senior React &amp;amp; TypeScript Engineer в Synthetic DOU Studio, Варшава, віддалено</title>
+    <link>https://jobs.dou.ua/companies/synthetic-dou/vacancies/400001/?utm_source=jobsrss</link>
+    <description>&lt;p&gt;Build React and TypeScript products on Azure.&lt;/p&gt;</description>
+    <pubDate>Thu, 27 Aug 2026 12:15:36 +0300</pubDate>
+  </item></channel></rss>`, filters);
+  assert.equal(jobs.length, 1);
+  assert.deepEqual(jobs[0], {
+    source: "dou",
+    sourceName: "DOU",
+    externalId: "400001",
+    title: "Senior React & TypeScript Engineer",
+    company: "Synthetic DOU Studio",
+    location: "Варшава, віддалено",
+    workMode: "remote",
+    employmentType: "unspecified",
+    technologies: ["Front End", "TypeScript", "React", "Azure"],
+    description: "Build React and TypeScript products on Azure.",
+    postedAt: "2026-08-27T09:15:36.000Z",
+    url: "https://jobs.dou.ua/companies/synthetic-dou/vacancies/400001/",
+  });
+});
 
-  const dou = buildExternalJobBoardUrl("dou", search);
-  assert.equal(dou.hostname, "jobs.dou.ua");
-  assert.equal(dou.searchParams.get("search"), "React Engineer Warszawa");
-  assert.equal(dou.searchParams.has("remote"), true);
-
-  const weWorkRemotely = buildExternalJobBoardUrl("weworkremotely", search);
-  assert.equal(weWorkRemotely.hostname, "weworkremotely.com");
-  assert.equal(weWorkRemotely.searchParams.get("term"), "React Engineer Warszawa");
+test("builds and locally filters the public We Work Remotely feed", () => {
+  const filters: JobSearchFilters = {
+    keywords: "TypeScript React", location: "European Union", workModes: ["remote"],
+    categories: ["front-end"], technologies: [], seniorities: [],
+  };
+  const url = buildWeWorkRemotelyFeedUrl(filters);
+  assert.equal(url.toString(), "https://weworkremotely.com/categories/remote-front-end-programming-jobs.rss");
+  const jobs = normalizeWeWorkRemotelyFeed(`<?xml version="1.0"?><rss><channel><item>
+    <title>Synthetic Global Co: Remote TypeScript Engineer</title>
+    <region>European Union</region><country>Poland</country><state></state>
+    <skills>TypeScript, React, Accessibility</skills><type>Full-Time</type>
+    <description>&lt;p&gt;Build accessible React products with TypeScript.&lt;/p&gt;</description>
+    <link>https://weworkremotely.com/remote-jobs/synthetic-global-co-remote-typescript-engineer</link>
+    <guid>https://weworkremotely.com/remote-jobs/synthetic-global-co-remote-typescript-engineer</guid>
+    <pubDate>Thu, 27 Aug 2026 18:22:56 +0000</pubDate>
+  </item></channel></rss>`, filters);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.externalId, "synthetic-global-co-remote-typescript-engineer");
+  assert.equal(jobs[0]?.company, "Synthetic Global Co");
+  assert.equal(jobs[0]?.title, "Remote TypeScript Engineer");
+  assert.equal(jobs[0]?.location, "European Union, Poland");
+  assert.equal(jobs[0]?.workMode, "remote");
+  assert.equal(jobs[0]?.employmentType, "full_time");
+  assert.deepEqual(jobs[0]?.technologies, ["TypeScript", "React", "Accessibility"]);
+  assert.equal(parseExternalJob(jobs[0])?.source, "weworkremotely");
+  assert.equal(parseExternalJob(jobs[0])?.url, jobs[0]?.url);
+  assert.equal(parseExternalJob({ ...jobs[0], url: "https://example.com/remote-jobs/fake" }), null);
 });
 
 test("normalizes and merges NoFluffJobs multi-location postings by stable reference", () => {

@@ -11,7 +11,7 @@ The goal is to turn that workflow into one centralized and extensible system.
 ## What it does
 
 * **Job tracking** — manage opportunities from discovery to offer or rejection with persistent status history.
-* **Job discovery** — search JustJoinIT and NoFluffJobs in 100-job pages, launch focused searches on DOU, LinkedIn, Pracuj.pl, and We Work Remotely, review full vacancy details, save relevant jobs, and hide irrelevant results.
+* **Job discovery** — download current vacancies from JustJoinIT, NoFluffJobs, DOU, and We Work Remotely, review full details, save relevant jobs, and hide irrelevant results.
 * **Application board** — organize opportunities by their current hiring stage.
 * **Search preferences** — maintain preferred titles and included/excluded technologies.
 * **Duplicate prevention** — detect already saved or imported vacancies using stable external identities and normalized fallbacks.
@@ -49,7 +49,8 @@ flowchart LR
 
     Sources --> JJ["JustJoinIT"]
     Sources --> NF["NoFluffJobs"]
-    Sources -.-> Outbound["DOU · LinkedIn · Pracuj.pl · We Work Remotely"]
+    Sources --> DOU["DOU RSS"]
+    Sources --> WWR["We Work Remotely RSS"]
 
     CV --> Gemini["Gemini analysis + ResumeContent"]
     CV --> Template["Validated user HTML template"]
@@ -81,11 +82,11 @@ Each completed resume is stored as an immutable version associated with the job 
 
 Job discovery uses a source-adapter architecture.
 
-The integrated sources are **JustJoinIT** and **NoFluffJobs**. Each explicit search retrieves bounded 100-job source pages, normalizes the results, and presents 100 vacancies per application page.
+The integrated sources are **JustJoinIT**, **NoFluffJobs**, **DOU**, and **We Work Remotely**. JustJoinIT and NoFluffJobs retrieve bounded 100-job source pages. DOU uses its official vacancy RSS feed, which exposes 50 newest items unfiltered or 25 with search/category filters. We Work Remotely uses its explicitly public all-jobs and category RSS feeds. Every source enters the same normalized review, selection, add, hide, and saved-job workflow, and the application presents up to 100 vacancies per UI page.
 
 Search results are normalized into a shared internal representation before reaching the UI. The application then compares them against saved and ignored vacancies before presenting the final result set.
 
-Full vacancy details are loaded only when needed. DOU, LinkedIn, Pracuj.pl, and We Work Remotely are outbound search tabs: they safely open a filtered board search in a new browser tab and do not scrape or silently import third-party pages.
+Feed descriptions provide the initial vacancy details, and source pages remain linked for verification. LinkedIn is not integrated because its documented Jobs API is restricted to approved Talent Solutions partners and does not provide public vacancy search. Pracuj.pl is not integrated because it publishes no supported public vacancy-read API or feed and blocks unattended server requests with an anti-bot challenge. Neither site is presented as an integrated discovery tab.
 
 Adding another job board requires implementing a new source adapter while the discovery table, detail drawer, filtering, selection, deduplication, and persistence logic remain shared.
 

@@ -71,6 +71,7 @@ export class JustJoinAdapter implements JobSourceAdapter {
   readonly id = "justjoinit" as const;
   readonly name = "JustJoinIT";
   readonly websiteUrl = "https://justjoin.it/job-offers";
+  readonly supportedWorkModes = ["remote", "hybrid", "onsite"] as const;
   readonly filterOptions = JUST_JOIN_FILTER_OPTIONS;
 
   async searchJobs(filters: JobSearchFilters): Promise<ExternalJobSearchResult> {

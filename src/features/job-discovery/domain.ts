@@ -65,7 +65,10 @@ export function parseExternalJob(value: unknown): NormalizedExternalJob | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
   if (!isValidExternalIdentity(input.source, input.externalId)) return null;
-  const source = input.source === "justjoinit" || input.source === "nofluffjobs" ? input.source : null;
+  const source = input.source === "justjoinit" || input.source === "nofluffjobs"
+    || input.source === "dou" || input.source === "weworkremotely"
+    ? input.source
+    : null;
   const title = trimmed(input.title, 200);
   const company = trimmed(input.company, 200);
   const urlValue = trimmed(input.url, 2048);
@@ -79,6 +82,8 @@ export function parseExternalJob(value: unknown): NormalizedExternalJob | null {
   if (url.protocol !== "https:" || url.username || url.password) return null;
   if (source === "justjoinit" && (url.hostname !== "justjoin.it" || !url.pathname.startsWith("/job-offer/"))) return null;
   if (source === "nofluffjobs" && (url.hostname !== "nofluffjobs.com" || !url.pathname.startsWith("/pl/job/"))) return null;
+  if (source === "dou" && (url.hostname !== "jobs.dou.ua" || !/^\/companies\/[^/]+\/vacancies\/\d+\/?$/.test(url.pathname))) return null;
+  if (source === "weworkremotely" && (url.hostname !== "weworkremotely.com" || !url.pathname.startsWith("/remote-jobs/"))) return null;
   const workMode = typeof input.workMode === "string" && WORK_MODES.includes(input.workMode as WorkMode)
     ? input.workMode as WorkMode
     : null;
@@ -106,7 +111,13 @@ export function parseExternalJob(value: unknown): NormalizedExternalJob | null {
   }
   return {
     source,
-    sourceName: source === "justjoinit" ? "JustJoinIT" : "NoFluffJobs",
+    sourceName: source === "justjoinit"
+      ? "JustJoinIT"
+      : source === "nofluffjobs"
+        ? "NoFluffJobs"
+        : source === "dou"
+          ? "DOU"
+          : "We Work Remotely",
     externalId: String(input.externalId),
     title,
     company,
