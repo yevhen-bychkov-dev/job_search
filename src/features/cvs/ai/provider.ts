@@ -178,7 +178,7 @@ export function coverLetterContentJsonSchema(): Record<string, unknown> {
       salutation: { type: "string", description: "A professional greeting without inventing a recipient name." },
       paragraphs: {
         type: "array",
-        description: "Three to five concise, truthful paragraphs tailored to the vacancy; every paragraph cites verified achievements.",
+        description: "Three or four natural CEFR B2 paragraphs, targeting 220-320 words in total; every paragraph cites verified achievements through metadata that is not included in its text.",
         items: {
           type: "object",
           additionalProperties: false,
@@ -239,9 +239,9 @@ export function deterministicCoverLetter(input: GenerateCoverLetterInput): Recor
   return {
     salutation: "Dear Hiring Team,",
     paragraphs: [
-      { text: `I am applying for the ${input.job.title} role at ${input.job.company}. The opportunity aligns with my verified professional background${skills ? ` in ${skills}` : ""}.`, sources: [source] },
+      { text: `I am applying for the ${input.job.title} role at ${input.job.company}.${skills ? ` I have practical experience with ${skills}.` : ""}`, sources: [source] },
       { text: evidence, sources: [source] },
-      { text: `I would welcome the opportunity to discuss how this experience can support the responsibilities described for ${input.job.title}.`, sources: [source] },
+      { text: "I would be glad to discuss how my experience could help in this role.", sources: [source] },
     ],
     signOff: "Sincerely,",
   };
