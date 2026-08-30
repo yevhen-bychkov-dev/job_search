@@ -1,11 +1,14 @@
 import "server-only";
 
+import { fetchWithTransientRetry } from "../fetch-with-retry";
 import type { JobSearchFilters } from "../types";
 import { parseNoFluffSearchPage, type ParsedNoFluffSearchPage } from "./normalize";
 import { buildNoFluffSearchRequest } from "./search";
 
 const DETAIL_ENDPOINT = "https://nofluffjobs.com/api/posting/";
-const MAX_RESPONSE_BYTES = 5_000_000;
+// NFJ currently returns more than 6 MB for its first unfiltered result page,
+// even when a smaller limit is requested.
+const MAX_RESPONSE_BYTES = 10_000_000;
 
 async function responseJson(response: Response, source: string): Promise<unknown> {
   if (!response.ok) throw new Error(`${source} responded with ${response.status}.`);
@@ -25,7 +28,7 @@ export async function fetchNoFluffSearchPage(
   page: number,
 ): Promise<ParsedNoFluffSearchPage> {
   const request = buildNoFluffSearchRequest(filters, page);
-  const response = await fetch(request.url, {
+  const response = await fetchWithTransientRetry(request.url, {
     method: "POST",
     cache: "no-store",
     headers: {
@@ -35,7 +38,6 @@ export async function fetchNoFluffSearchPage(
     },
     body: request.body,
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
   });
   return parseNoFluffSearchPage(await responseJson(response, "NoFluffJobs"));
 }
@@ -45,14 +47,13 @@ export async function fetchNoFluffJobDetails(externalId: string): Promise<unknow
     throw new Error("Invalid NoFluffJobs external identifier.");
   }
   const url = new URL(encodeURIComponent(externalId), DETAIL_ENDPOINT);
-  const response = await fetch(url, {
+  const response = await fetchWithTransientRetry(url, {
     cache: "no-store",
     headers: {
       accept: "application/json",
       "user-agent": "JobSearchOS/0.1 personal-job-discovery",
     },
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
   });
   return responseJson(response, "NoFluffJobs");
 }

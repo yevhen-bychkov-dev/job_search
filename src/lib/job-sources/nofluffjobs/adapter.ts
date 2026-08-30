@@ -18,12 +18,9 @@ import {
   parseNoFluffJobDescription,
 } from "./normalize";
 import {
-  MAX_NO_FLUFF_SEARCH_PAGES,
-  NO_FLUFF_PAGE_SIZE,
+  MAX_NO_FLUFF_RESULTS,
   noFluffPagesToFetch,
 } from "./search";
-
-const PAGE_CONCURRENCY = 3;
 
 export const NO_FLUFF_FILTER_OPTIONS = {
   categories: [
@@ -123,23 +120,28 @@ export class NoFluffJobsAdapter implements JobSourceAdapter {
     const first = await fetchNoFluffSearchPage(filters, 1);
     const pageCount = noFluffPagesToFetch(first.totalPages);
     const postings = [...first.postings];
-    for (let start = 2; start <= pageCount; start += PAGE_CONCURRENCY) {
-      const pages = Array.from(
-        { length: Math.min(PAGE_CONCURRENCY, pageCount - start + 1) },
-        (_, index) => start + index,
-      );
-      const batch = await Promise.all(pages.map((page) => fetchNoFluffSearchPage(filters, page)));
-      postings.push(...batch.flatMap((result) => result.postings));
+    let pagesFetched = 1;
+    for (let page = 2; page <= pageCount && postings.length < MAX_NO_FLUFF_RESULTS; page += 1) {
+      try {
+        const result = await fetchNoFluffSearchPage(filters, page);
+        postings.push(...result.postings);
+        pagesFetched = page;
+      } catch {
+        // Keep the newest successfully fetched pages instead of failing an
+        // otherwise useful search because an older provider page was transient.
+        break;
+      }
     }
-    const jobs = postings.flatMap((posting) => {
+    const normalizedJobs = postings.flatMap((posting) => {
       const job = normalizeNoFluffPosting(posting);
       return job ? [job] : [];
     });
+    const jobs = newestFirst(mergeNoFluffJobs(normalizedJobs).filter((job) => matchesWorkMode(job, filters)));
     return {
-      jobs: newestFirst(mergeNoFluffJobs(jobs).filter((job) => matchesWorkMode(job, filters))),
+      jobs: jobs.slice(0, MAX_NO_FLUFF_RESULTS),
       sourceResultCount: first.totalCount,
-      sourceBatchLimit: pageCount * NO_FLUFF_PAGE_SIZE,
-      sourceHasMore: first.totalPages > MAX_NO_FLUFF_SEARCH_PAGES,
+      sourceBatchLimit: Math.min(jobs.length, MAX_NO_FLUFF_RESULTS),
+      sourceHasMore: first.totalPages > pagesFetched || jobs.length > MAX_NO_FLUFF_RESULTS,
     };
   }
 

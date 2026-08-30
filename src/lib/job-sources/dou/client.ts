@@ -1,16 +1,17 @@
 import "server-only";
 
+import { fetchWithTransientRetry } from "../fetch-with-retry";
+
 const MAX_RESPONSE_BYTES = 5_000_000;
 
 async function fetchDouText(url: URL, accept: string): Promise<string> {
   if (url.protocol !== "https:" || url.hostname !== "jobs.dou.ua") {
     throw new Error("Refused an unexpected DOU URL.");
   }
-  const response = await fetch(url, {
+  const response = await fetchWithTransientRetry(url, {
     cache: "no-store",
     headers: { accept, "user-agent": "JobSearchOS/0.1 personal-job-discovery" },
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`DOU responded with ${response.status}.`);
   const declaredSize = Number(response.headers.get("content-length") ?? 0);

@@ -3,6 +3,7 @@ import type { JobSearchFilters } from "../types";
 const SEARCH_ENDPOINT = "https://nofluffjobs.com/api/search/posting";
 export const NO_FLUFF_PAGE_SIZE = 100;
 export const MAX_NO_FLUFF_SEARCH_PAGES = 5;
+export const MAX_NO_FLUFF_RESULTS = 500;
 
 function locationSlug(value: string): string {
   return value

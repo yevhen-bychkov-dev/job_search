@@ -26,8 +26,10 @@ import {
 } from "../../src/lib/job-sources/nofluffjobs/normalize.ts";
 import {
   buildNoFluffSearchRequest,
+  MAX_NO_FLUFF_RESULTS,
   noFluffPagesToFetch,
 } from "../../src/lib/job-sources/nofluffjobs/search.ts";
+import { fetchWithTransientRetry } from "../../src/lib/job-sources/fetch-with-retry.ts";
 import { normalizeDouFeed } from "../../src/lib/job-sources/dou/normalize.ts";
 import { buildDouFeedUrl } from "../../src/lib/job-sources/dou/search.ts";
 import type { JobSearchFilters, NormalizedExternalJob } from "../../src/lib/job-sources/types.ts";
@@ -230,6 +232,43 @@ test("builds the current NoFluffJobs search request with real criteria and requi
   assert.equal(noFluffPagesToFetch(0), 1);
   assert.equal(noFluffPagesToFetch(4), 4);
   assert.equal(noFluffPagesToFetch(999), 5);
+  assert.equal(MAX_NO_FLUFF_RESULTS, 500);
+});
+
+test("retries transient job-source responses without retrying permanent failures", async () => {
+  const transientStatuses = [503, 429, 200];
+  const waits: number[] = [];
+  const transient = await fetchWithTransientRetry("https://example.com/jobs", {}, {
+    fetcher: async () => new Response("", { status: transientStatuses.shift() ?? 500 }),
+    wait: async (delayMs) => { waits.push(delayMs); },
+  });
+  assert.equal(transient.status, 200);
+  assert.deepEqual(waits, [200, 400]);
+
+  let permanentAttempts = 0;
+  const permanent = await fetchWithTransientRetry("https://example.com/jobs", {}, {
+    fetcher: async () => {
+      permanentAttempts += 1;
+      return new Response("", { status: 400 });
+    },
+    wait: async () => undefined,
+  });
+  assert.equal(permanent.status, 400);
+  assert.equal(permanentAttempts, 1);
+});
+
+test("retries a transient job-source network failure", async () => {
+  let attempts = 0;
+  const response = await fetchWithTransientRetry("https://example.com/jobs", {}, {
+    fetcher: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError("synthetic network failure");
+      return new Response("ok");
+    },
+    wait: async () => undefined,
+  });
+  assert.equal(await response.text(), "ok");
+  assert.equal(attempts, 2);
 });
 
 test("builds and normalizes the official DOU vacancy feed", () => {
