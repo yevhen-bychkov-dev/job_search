@@ -1,4 +1,5 @@
 import type { FilterSettings } from "@/features/filters/types";
+import type { CoverLetterContent, GeneratedCoverLetter } from "@/features/cover-letters/types";
 import type { ApprovedResumeSkill, CvFitAssessmentContent, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeAiStage, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import type { Job, JobInput, JobQuery, JobStatus, JobStatusHistory } from "@/features/jobs/types";
 import type { CandidateProfile } from "@/features/knowledge/candidate-profile";
@@ -54,6 +55,7 @@ export type StoredKnowledgeDownload =
   | { kind: "content"; bytes: Uint8Array; mimeType: string; filename: string };
 
 export type StoredCvDownload = StoredKnowledgeDownload;
+export type StoredCoverLetterDownload = StoredKnowledgeDownload;
 
 export type ResumeTemplate = {
   id: string;
@@ -133,5 +135,14 @@ export interface AppStore {
     input: { assessment: CvFitAssessmentContent; sourceUrl: string; aiProvider: string; aiModel: string },
   ): Promise<GeneratedCv>;
   deleteGeneratedCv(userId: string, jobId: string, id: string): Promise<void>;
+  listGeneratedCoverLetters(userId: string, jobId: string): Promise<GeneratedCoverLetter[]>;
+  getGeneratedCoverLetterByRequestId(userId: string, jobId: string, requestId: string): Promise<GeneratedCoverLetter | null>;
+  createGeneratedCoverLetter(
+    userId: string,
+    jobId: string,
+    input: { bytes: Uint8Array; content: CoverLetterContent; aiProvider: string; aiModel: string; requestId: string },
+  ): Promise<GeneratedCoverLetter>;
+  downloadGeneratedCoverLetter(userId: string, jobId: string, id: string): Promise<StoredCoverLetterDownload>;
+  deleteGeneratedCoverLetter(userId: string, jobId: string, id: string): Promise<void>;
   resetForTests(): Promise<void>;
 }

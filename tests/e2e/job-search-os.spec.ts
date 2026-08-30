@@ -118,7 +118,7 @@ test("job creation, list, detail, edit, board status, dashboard, and delete", as
   await expect(page.getByRole("heading", { name: "Frontend Engineer" })).toBeVisible();
   await expect(page.getByText("Job created.")).toBeVisible();
   await expect(page.getByText("Synthetic role used only")).toBeVisible();
-  await expect(page.getByText(/Add a validated Candidate Profile JSON/)).toBeVisible();
+  await expect(page.getByText(/Add a validated Candidate Profile JSON/).first()).toBeVisible();
 
   await page.getByRole("link", { name: "Edit job" }).click();
   const stalePage = await page.context().newPage();
@@ -475,6 +475,30 @@ test("generate, assess, and remove stable CV versions from approved skills", asy
     expect(download.headers()["content-disposition"]).toContain("attachment; filename*=UTF-8''SyntheticCandidate_SyntheticHiringCo_CV.pdf");
   }
 
+  const coverLetterSection = page.locator('article[aria-labelledby="cover-letters-heading"]');
+  await expect(coverLetterSection.getByText("No cover letters generated for this job yet.")).toBeVisible();
+  await coverLetterSection.getByRole("button", { name: "Create cover letter", exact: true }).click();
+  await expect(coverLetterSection.getByText("Cover letter generated.")).toBeVisible({ timeout: 20_000 });
+  await expect(coverLetterSection.locator(".cv-record-heading > strong")).toHaveText(["SyntheticCandidate_SyntheticHiringCo_CoverLetter.pdf"]);
+  await coverLetterSection.getByRole("button", { name: "Create cover letter", exact: true }).click();
+  await expect(coverLetterSection.locator(".cv-record-heading > strong")).toHaveText(["SyntheticCandidate_SyntheticHiringCo_CoverLetter.pdf", "SyntheticCandidate_SyntheticHiringCo_CoverLetter.pdf"], { timeout: 20_000 });
+  const newestCoverLetter = coverLetterSection.locator(".cv-list > li").filter({ hasText: "Version 2" });
+  page.once("dialog", (dialog) => dialog.accept());
+  await newestCoverLetter.getByRole("button", { name: "Remove cover letter", exact: true }).click();
+  await expect(page.getByText("Generated cover letter removed. Its version number remains reserved.")).toBeVisible();
+  await expect(coverLetterSection.locator(".cv-record-heading > strong")).toHaveText(["SyntheticCandidate_SyntheticHiringCo_CoverLetter.pdf"]);
+
+  const coverPreviewHref = await coverLetterSection.getByRole("link", { name: "Preview cover letter", exact: true }).getAttribute("href");
+  const coverDownloadHref = await coverLetterSection.getByRole("link", { name: "Download cover letter", exact: true }).getAttribute("href");
+  if (!coverPreviewHref || !coverDownloadHref) throw new Error("Generated cover-letter links were not rendered.");
+  const coverPreview = await page.request.get(coverPreviewHref);
+  expect(coverPreview.ok()).toBeTruthy();
+  expect(coverPreview.headers()["content-type"]).toContain("application/pdf");
+  expect(coverPreview.headers()["content-disposition"]).toContain("inline");
+  const coverDownload = await page.request.get(coverDownloadHref);
+  expect(coverDownload.ok()).toBeTruthy();
+  expect(coverDownload.headers()["content-disposition"]).toContain("attachment; filename*=UTF-8''SyntheticCandidate_SyntheticHiringCo_CoverLetter.pdf");
+
   await page.context().clearCookies();
   await signIn(page, SECONDARY_TEST_EMAIL);
   await page.goto(ownedJobUrl);
@@ -485,6 +509,8 @@ test("generate, assess, and remove stable CV versions from approved skills", asy
     const foreignCv = await page.request.get(href);
     expect(foreignCv.status()).toBe(404);
   }
+  expect((await page.request.get(coverPreviewHref)).status()).toBe(404);
+  expect((await page.request.get(coverDownloadHref)).status()).toBe(404);
 });
 
 test("major screens render cleanly at desktop and narrow widths", async ({ page }, testInfo) => {

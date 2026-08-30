@@ -2,6 +2,8 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
+import { generatedCoverLetterFilename, nextCoverLetterVersion, parseCoverLetterContent } from "@/features/cover-letters/domain";
+import type { GeneratedCoverLetter } from "@/features/cover-letters/types";
 import { generatedCvFilename, nextCvVersion, parseCvFitAssessment, parseStoredGeneratedCvContent, parseVacancyAnalysis, recoverSavedJobRequirementsFromAnalysis, validateSavedJobRequirements } from "@/features/cvs/domain";
 import type { ApprovedResumeSkill, GeneratedCv, GeneratedCvContent, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, ResumeGenerationStatus, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
@@ -31,6 +33,7 @@ type JobRow = Awaited<ReturnType<typeof getJobRows>>[number];
 const RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,generation_json,current_stage,attempt_count,next_retry_at,lease_expires_at,error_code,template_version,ai_provider,ai_model,created_at,updated_at";
 const LEGACY_RESUME_GENERATION_SELECT = "id,job_id,status,idempotency_key,analysis_json,confirmations_json,generation_json,current_stage,attempt_count,next_retry_at,error_code,template_version,created_at,updated_at";
 const GENERATED_CV_SELECT = "id,job_id,version,file_path,content_json,ai_provider,ai_model,generation_id,template_version,assessment_json,assessment_provider,assessment_model,assessed_source_url,assessed_at,deleted_at,created_at";
+const GENERATED_COVER_LETTER_SELECT = "id,job_id,version,file_path,content_json,ai_provider,ai_model,request_id,deleted_at,created_at";
 const ACTIVE_GENERATION_STATUSES: ResumeGenerationStatus[] = ["analyzing", "awaiting_confirmation", "strategizing", "generating", "critiquing", "correcting", "rendering", "retrying"];
 
 function isMissingResumeReliabilityColumn(error: { code?: string; message?: string } | null): boolean {
@@ -144,6 +147,12 @@ function toGeneratedCv(row: {
     } : null,
     createdAt: row.created_at,
   };
+}
+
+function toGeneratedCoverLetter(row: { id: string; job_id: string; version: number; content_json: Json; ai_provider: string; ai_model: string; request_id: string; created_at: string }): GeneratedCoverLetter {
+  const content = parseCoverLetterContent(row.content_json);
+  if (!content.ok) throw new DataConsistencyError(content.message);
+  return { id: row.id, jobId: row.job_id, version: row.version, content: content.data, aiProvider: row.ai_provider, aiModel: row.ai_model, requestId: row.request_id, createdAt: row.created_at };
 }
 
 export class SupabaseAppStore implements AppStore {
@@ -992,6 +1001,80 @@ export class SupabaseAppStore implements AppStore {
       .eq("deleted_at", deletedAt);
     if (restored.error) reportUnexpectedError("cvs.delete.compensation", restored.error);
     throw new ArtifactPersistenceError("cleanup", "The generated CV file could not be removed.", { cause: removed.error });
+  }
+
+  async listGeneratedCoverLetters(userId: string, jobId: string): Promise<GeneratedCoverLetter[]> {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase.from("generated_cover_letters").select(GENERATED_COVER_LETTER_SELECT).eq("user_id", userId).eq("job_id", jobId).is("deleted_at", null).order("version", { ascending: false });
+    if (error?.code === "42P01") throw new DatabaseMigrationRequiredError("Apply migration 202608300001_generated_cover_letters.sql before creating a cover letter.");
+    if (error) throw new Error(`Unable to load generated cover letters: ${error.message}`);
+    const result: GeneratedCoverLetter[] = [];
+    for (const row of data) {
+      try { result.push(toGeneratedCoverLetter(row)); }
+      catch (rowError) { if (!(rowError instanceof DataConsistencyError)) throw rowError; reportUnexpectedError("cover-letters.read.skipped-invalid-row", rowError); }
+    }
+    return result;
+  }
+
+  async getGeneratedCoverLetterByRequestId(userId: string, jobId: string, requestId: string): Promise<GeneratedCoverLetter | null> {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase.from("generated_cover_letters").select(GENERATED_COVER_LETTER_SELECT).eq("user_id", userId).eq("job_id", jobId).eq("request_id", requestId).is("deleted_at", null).maybeSingle();
+    if (error?.code === "42P01") throw new DatabaseMigrationRequiredError("Apply migration 202608300001_generated_cover_letters.sql before creating a cover letter.");
+    if (error) throw new Error(`Unable to load the cover-letter request: ${error.message}`);
+    return data ? toGeneratedCoverLetter(data) : null;
+  }
+
+  async createGeneratedCoverLetter(userId: string, jobId: string, input: Parameters<AppStore["createGeneratedCoverLetter"]>[2]): Promise<GeneratedCoverLetter> {
+    if (!(await this.getJob(userId, jobId))) throw new ResourceNotFoundError("Job");
+    const supabase = await createServerSupabaseClient();
+    const id = crypto.randomUUID();
+    const objectPath = `${userId}/${jobId}/${id}.pdf`;
+    const upload = await supabase.storage.from("generated-cover-letters").upload(objectPath, input.bytes, { contentType: "application/pdf", upsert: false });
+    if (upload.error) throw new ArtifactPersistenceError("upload", "Unable to upload the generated cover letter.", { cause: upload.error });
+    const cleanup = async (message: string): Promise<never> => {
+      const removed = await supabase.storage.from("generated-cover-letters").remove([objectPath]);
+      if (removed.error) throw new ArtifactPersistenceError("cleanup", "The uploaded cover letter could not be cleaned up.", { cause: removed.error });
+      throw new ArtifactPersistenceError("metadata", message);
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const existing = await supabase.from("generated_cover_letters").select("version").eq("user_id", userId).eq("job_id", jobId).order("version", { ascending: false }).limit(1);
+      if (existing.error) return cleanup(`Unable to calculate the next cover-letter version: ${existing.error.message}`);
+      const created = await supabase.from("generated_cover_letters").insert({ id, user_id: userId, job_id: jobId, version: nextCoverLetterVersion(existing.data.map((row) => row.version)), file_path: objectPath, content_json: input.content as unknown as Json, ai_provider: input.aiProvider, ai_model: input.aiModel, request_id: input.requestId }).select(GENERATED_COVER_LETTER_SELECT).single();
+      if (!created.error) return toGeneratedCoverLetter(created.data);
+      if (created.error.code !== "23505") return cleanup(`Unable to record the generated cover letter: ${created.error.message}`);
+      const committed = await supabase.from("generated_cover_letters").select(GENERATED_COVER_LETTER_SELECT).eq("user_id", userId).eq("job_id", jobId).eq("request_id", input.requestId).maybeSingle();
+      if (committed.error) return cleanup(`Unable to verify a concurrent cover-letter insert: ${committed.error.message}`);
+      if (committed.data) {
+        const removed = await supabase.storage.from("generated-cover-letters").remove([objectPath]);
+        if (removed.error) throw new ArtifactPersistenceError("cleanup", "The duplicate cover-letter upload could not be cleaned up.", { cause: removed.error });
+        return toGeneratedCoverLetter(committed.data);
+      }
+    }
+    return cleanup("Unable to allocate a unique cover-letter version after several attempts.");
+  }
+
+  async downloadGeneratedCoverLetter(userId: string, jobId: string, id: string) {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase.from("generated_cover_letters").select("file_path").eq("user_id", userId).eq("job_id", jobId).eq("id", id).is("deleted_at", null).maybeSingle();
+    if (error) throw new Error(`Unable to load generated cover letter: ${error.message}`);
+    if (!data) throw new ResourceNotFoundError("Cover letter");
+    const [job, profile, download] = await Promise.all([this.getJob(userId, jobId), this.getCandidateProfile(userId), supabase.storage.from("generated-cover-letters").download(data.file_path)]);
+    if (!job) throw new ResourceNotFoundError("Job");
+    if (download.error) throw new Error(`Unable to open generated cover letter: ${download.error.message}`);
+    return { kind: "content" as const, bytes: new Uint8Array(await download.data.arrayBuffer()), mimeType: "application/pdf", filename: generatedCoverLetterFilename(profile?.personal.name ?? "Candidate", job.company) };
+  }
+
+  async deleteGeneratedCoverLetter(userId: string, jobId: string, id: string): Promise<void> {
+    const supabase = await createServerSupabaseClient();
+    const deletedAt = new Date().toISOString();
+    const marked = await supabase.from("generated_cover_letters").update({ deleted_at: deletedAt }).eq("user_id", userId).eq("job_id", jobId).eq("id", id).is("deleted_at", null).select("file_path").maybeSingle();
+    if (marked.error) throw new Error(`Unable to mark the cover letter as removed: ${marked.error.message}`);
+    if (!marked.data) throw new ResourceNotFoundError("Cover letter");
+    const removed = await supabase.storage.from("generated-cover-letters").remove([marked.data.file_path]);
+    if (!removed.error) return;
+    const restored = await supabase.from("generated_cover_letters").update({ deleted_at: null }).eq("user_id", userId).eq("job_id", jobId).eq("id", id).eq("deleted_at", deletedAt);
+    if (restored.error) reportUnexpectedError("cover-letters.delete.compensation", restored.error);
+    throw new ArtifactPersistenceError("cleanup", "The generated cover-letter file could not be removed.", { cause: removed.error });
   }
 
   async resetForTests(): Promise<void> {

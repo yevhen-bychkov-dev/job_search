@@ -9,6 +9,48 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      generated_cover_letters: {
+        Row: {
+          ai_model: string;
+          ai_provider: string;
+          content_json: Json;
+          created_at: string;
+          deleted_at: string | null;
+          file_path: string;
+          id: string;
+          job_id: string;
+          request_id: string;
+          user_id: string;
+          version: number;
+        };
+        Insert: {
+          ai_model: string;
+          ai_provider: string;
+          content_json: Json;
+          created_at?: string;
+          deleted_at?: string | null;
+          file_path: string;
+          id?: string;
+          job_id: string;
+          request_id: string;
+          user_id: string;
+          version: number;
+        };
+        Update: {
+          ai_model?: string;
+          ai_provider?: string;
+          content_json?: Json;
+          created_at?: string;
+          deleted_at?: string | null;
+          file_path?: string;
+          id?: string;
+          job_id?: string;
+          request_id?: string;
+          user_id?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
       generated_cvs: {
         Row: {
           assessed_at: string | null;

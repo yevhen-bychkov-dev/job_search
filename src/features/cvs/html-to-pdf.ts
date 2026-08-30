@@ -21,12 +21,10 @@ export async function renderHtmlToPdf(html: string): Promise<Uint8Array> {
   let browser: Browser;
   try {
     const executablePath = explicitPath
-      || (useServerlessChromium
-        ? await serverlessChromium.executablePath()
-        : chromium.executablePath());
+      || (useServerlessChromium ? await serverlessChromium.executablePath() : undefined);
     browser = await chromium.launch({
       headless: true,
-      executablePath,
+      ...(executablePath ? { executablePath } : {}),
       args: useServerlessChromium
         ? serverlessChromium.args
         : ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],

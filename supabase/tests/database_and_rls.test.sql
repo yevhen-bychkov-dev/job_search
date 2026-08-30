@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(114);
+select plan(140);
 
 insert into auth.users (id, aud, role, email, encrypted_password)
 values
@@ -87,6 +87,40 @@ select lives_ok(
 );
 select is((select count(*) from public.generated_cvs), 1::bigint, 'user B can read the owned CV version');
 select lives_ok(
+  $$insert into public.generated_cover_letters (id, user_id, job_id, version, file_path, content_json, ai_provider, ai_model, request_id)
+    values (
+      'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      '22222222-2222-4222-8222-222222222222',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      1,
+      '22222222-2222-4222-8222-222222222222/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/dddddddd-dddd-4ddd-8ddd-dddddddddddd.pdf',
+      '{"salutation":"Dear Hiring Team,","paragraphs":["One","Two","Three"],"signOff":"Sincerely,"}'::jsonb,
+      'gemini', 'gemini-test', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    )$$,
+  'user B can create an owned cover-letter version'
+);
+select is((select count(*) from public.generated_cover_letters), 1::bigint, 'user B can read the owned cover letter');
+select throws_ok(
+  $$insert into public.generated_cover_letters (user_id, job_id, version, file_path, content_json, ai_provider, ai_model, request_id)
+    values ('22222222-2222-4222-8222-222222222222', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 2,
+      '22222222-2222-4222-8222-222222222222/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/ffffffff-ffff-4fff-8fff-ffffffffffff.pdf',
+      '{"salutation":"Dear Hiring Team,","paragraphs":["Only one"],"signOff":"Sincerely,"}'::jsonb,
+      'gemini', 'gemini-test', 'ffffffff-ffff-4fff-8fff-ffffffffffff')$$,
+  '23514', null, 'database rejects an invalid cover-letter paragraph count'
+);
+select throws_ok(
+  $$update public.generated_cover_letters set ai_model = 'changed' where id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'$$,
+  '23514', null, 'generated cover-letter provenance remains immutable'
+);
+select throws_ok(
+  $$insert into public.generated_cover_letters (user_id, job_id, version, file_path, content_json, ai_provider, ai_model, request_id)
+    values ('22222222-2222-4222-8222-222222222222', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 1,
+      '22222222-2222-4222-8222-222222222222/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/ffffffff-ffff-4fff-8fff-ffffffffffff.pdf',
+      '{"salutation":"Dear Hiring Team,","paragraphs":["One","Two","Three"],"signOff":"Sincerely,"}'::jsonb,
+      'gemini', 'gemini-test', 'ffffffff-ffff-4fff-8fff-ffffffffffff')$$,
+  '23505', null, 'database rejects duplicate per-job cover-letter versions'
+);
+select lives_ok(
   $$update public.generated_cvs
     set assessment_json = '{"fitScore":8,"summary":"Strong synthetic fit.","strengths":["React"],"gaps":["GraphQL"]}'::jsonb,
         assessment_provider = 'gemini',
@@ -154,6 +188,17 @@ select throws_ok(
 
 set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
 select is((select count(*) from public.generated_cvs), 0::bigint, 'user A cannot read user B CV versions');
+select is((select count(*) from public.generated_cover_letters), 0::bigint, 'user A cannot read user B cover letters');
+select throws_ok(
+  $$insert into public.generated_cover_letters (user_id, job_id, version, file_path, content_json, ai_provider, ai_model, request_id)
+    values ('22222222-2222-4222-8222-222222222222', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 2,
+      '22222222-2222-4222-8222-222222222222/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/ffffffff-ffff-4fff-8fff-ffffffffffff.pdf',
+      '{"salutation":"Dear Hiring Team,","paragraphs":["One","Two","Three"],"signOff":"Sincerely,"}'::jsonb,
+      'gemini', 'gemini-test', 'ffffffff-ffff-4fff-8fff-ffffffffffff')$$,
+  '42501', null, 'user A cannot create a cover letter for user B job'
+);
+select is((with changed as (update public.generated_cover_letters set deleted_at = now() returning *) select count(*) from changed), 0::bigint, 'user A cannot update user B cover letters');
+select is((with removed as (delete from public.generated_cover_letters returning *) select count(*) from removed), 0::bigint, 'user A cannot delete user B cover letters');
 select throws_ok(
   $$insert into public.generated_cvs (user_id, job_id, version, file_path, content_json, ai_provider, ai_model)
     values (
@@ -174,6 +219,12 @@ select is((with removed as (delete from public.generated_cvs returning *) select
 
 set local request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 select is(
+  (with changed as (update public.generated_cover_letters set deleted_at = now() where id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' returning *) select count(*) from changed),
+  1::bigint,
+  'user B can soft-delete an owned cover letter'
+);
+select is((select max(version) from public.generated_cover_letters where job_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'), 1, 'soft-deleted cover-letter metadata keeps its version reserved');
+select is(
   (with changed as (update public.generated_cvs set deleted_at = now() where id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' returning *) select count(*) from changed),
   1::bigint,
   'user B can soft-delete an owned CV'
@@ -185,6 +236,7 @@ select is(
 );
 select is((with removed as (delete from public.jobs where user_id = '22222222-2222-4222-8222-222222222222' returning *) select count(*) from removed), 1::bigint, 'user B can delete an owned job');
 select is((select count(*) from public.generated_cvs), 0::bigint, 'deleting an owned job cascades its CV metadata');
+select is((select count(*) from public.generated_cover_letters), 0::bigint, 'deleting an owned job cascades its cover-letter metadata');
 
 select lives_ok(
   $$insert into public.user_filters (user_id) values ('22222222-2222-4222-8222-222222222222')$$,
@@ -264,6 +316,7 @@ select is((with removed as (delete from public.knowledge_files returning *) sele
 reset role;
 select is((select count(*) from storage.buckets where id = 'knowledge-base' and public = false), 1::bigint, 'private knowledge-base bucket exists');
 select is((select count(*) from storage.buckets where id = 'generated-cvs' and public = false), 1::bigint, 'private generated-cvs bucket exists');
+select is((select count(*) from storage.buckets where id = 'generated-cover-letters' and public = false), 1::bigint, 'private generated-cover-letters bucket exists');
 select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'knowledge_objects_%'), 4::bigint, 'Storage has select, insert, update, and delete ownership policies');
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'knowledge_files' and cmd = 'UPDATE'), 0::bigint, 'file metadata has no direct update policy');
 select like(
@@ -279,6 +332,8 @@ select like(
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'job_status_history' and cmd <> 'SELECT'), 0::bigint, 'status history cannot be directly mutated through RLS');
 select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'generated_cv_objects_%'), 3::bigint, 'generated CV Storage has select, insert, and compensation delete policies');
 select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'generated_cvs' and cmd = 'UPDATE'), 1::bigint, 'generated CV mutable metadata has one owner-and-parent update policy');
+select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'generated_cover_letter_objects_%'), 3::bigint, 'generated cover-letter Storage has select, insert, and compensation delete policies');
+select is((select count(*) from pg_policies where schemaname = 'public' and tablename = 'generated_cover_letters' and cmd = 'UPDATE'), 1::bigint, 'generated cover letters have one owner-and-parent update policy');
 select like(
   (select qual from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'generated_cv_objects_select_own'),
   '%owner_id%auth.uid%',
@@ -408,6 +463,7 @@ select is((select count(*) from public.user_filters), 0::bigint, 'anonymous user
 select is((select count(*) from public.knowledge_files), 0::bigint, 'anonymous users cannot read file metadata');
 select is((select count(*) from public.ignored_external_jobs), 0::bigint, 'anonymous users cannot read ignored identities');
 select is((select count(*) from public.generated_cvs), 0::bigint, 'anonymous users cannot read generated CVs');
+select is((select count(*) from public.generated_cover_letters), 0::bigint, 'anonymous users cannot read generated cover letters');
 select is((select count(*) from public.resume_templates), 0::bigint, 'anonymous users cannot read resume templates');
 select is((select count(*) from public.resume_confirmations), 0::bigint, 'anonymous users cannot read resume confirmations');
 select is((select count(*) from public.job_resume_requirements), 0::bigint, 'anonymous users cannot read job requirements');
@@ -460,6 +516,14 @@ select throws_ok(
   '42501',
   null,
   'anonymous users cannot create generated CV metadata'
+);
+select throws_ok(
+  $$insert into public.generated_cover_letters (user_id, job_id, version, file_path, content_json, ai_provider, ai_model, request_id)
+    values ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 1,
+      '11111111-1111-4111-8111-111111111111/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/ffffffff-ffff-4fff-8fff-ffffffffffff.pdf',
+      '{"salutation":"Dear Hiring Team,","paragraphs":["One","Two","Three"],"signOff":"Sincerely,"}'::jsonb,
+      'gemini', 'gemini-test', 'ffffffff-ffff-4fff-8fff-ffffffffffff')$$,
+  '42501', null, 'anonymous users cannot create generated cover-letter metadata'
 );
 select throws_ok(
   $$insert into public.resume_templates (user_id, object_path, original_name, size_bytes, version, active)

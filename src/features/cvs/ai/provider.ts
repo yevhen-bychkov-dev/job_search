@@ -20,6 +20,11 @@ export type GenerateCvInput = {
   approvedSkills: ApprovedResumeSkill[];
 };
 
+export type GenerateCoverLetterInput = {
+  job: VacancyAiJob;
+  candidate: CandidateProfileForAi;
+};
+
 export type AssessCvInput = {
   job: VacancyAiJob & { sourceUrl: string };
   cv: GeneratedCvContent;
@@ -28,7 +33,7 @@ export type AssessCvInput = {
 export type ResumeAiContext = {
   generationId?: string;
   jobId?: string;
-  stage: "analysis" | "generation" | "assessment";
+  stage: "analysis" | "generation" | "assessment" | "cover_letter";
 };
 
 export interface CvAiProvider {
@@ -36,6 +41,7 @@ export interface CvAiProvider {
   readonly model: string;
   analyzeVacancy(input: AnalyzeVacancyInput, context?: ResumeAiContext): Promise<unknown>;
   generateCv(input: GenerateCvInput, context?: ResumeAiContext): Promise<unknown>;
+  generateCoverLetter(input: GenerateCoverLetterInput, context?: ResumeAiContext): Promise<unknown>;
   assessCv(input: AssessCvInput, context?: ResumeAiContext): Promise<unknown>;
 }
 
@@ -163,6 +169,39 @@ export function cvFitAssessmentJsonSchema(): Record<string, unknown> {
   };
 }
 
+export function coverLetterContentJsonSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["salutation", "paragraphs", "signOff"],
+    properties: {
+      salutation: { type: "string", description: "A professional greeting without inventing a recipient name." },
+      paragraphs: {
+        type: "array",
+        description: "Three to five concise, truthful paragraphs tailored to the vacancy; every paragraph cites verified achievements.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["text", "sources"],
+          properties: {
+            text: { type: "string" },
+            sources: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["experienceId", "achievementId"],
+                properties: { experienceId: { type: "string" }, achievementId: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+      signOff: { type: "string", description: "A professional closing such as Sincerely," },
+    },
+  };
+}
+
 export function deterministicAnalysis(input: AnalyzeVacancyInput): Record<string, unknown> {
   return {
     skills: input.job.technologies.map((technology) => ({ label: technology, category: "technical", importance: "must_have" })),
@@ -188,6 +227,23 @@ export function deterministicResume(input: GenerateCvInput): Record<string, unkn
       bullets: experience.achievements.map((achievement) => ({ text: achievement.text, sourceAchievementIds: [achievement.id] })),
     })),
     educationIds: input.candidate.education.map((education) => education.id),
+  };
+}
+
+export function deterministicCoverLetter(input: GenerateCoverLetterInput): Record<string, unknown> {
+  const experience = input.candidate.experience[0];
+  const achievement = experience?.achievements[0];
+  const source = { experienceId: experience?.id ?? "missing", achievementId: achievement?.id ?? "missing" };
+  const evidence = achievement?.text ?? "I bring relevant, verified experience to this role.";
+  const skills = input.candidate.skills.slice(0, 3).join(", ");
+  return {
+    salutation: "Dear Hiring Team,",
+    paragraphs: [
+      { text: `I am applying for the ${input.job.title} role at ${input.job.company}. The opportunity aligns with my verified professional background${skills ? ` in ${skills}` : ""}.`, sources: [source] },
+      { text: evidence, sources: [source] },
+      { text: `I would welcome the opportunity to discuss how this experience can support the responsibilities described for ${input.job.title}.`, sources: [source] },
+    ],
+    signOff: "Sincerely,",
   };
 }
 

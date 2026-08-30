@@ -6,7 +6,7 @@ I started building it to solve a problem I was experiencing myself: job opportun
 
 The goal is to turn that workflow into one centralized and extensible system.
 
-> **Status:** actively developed. Core job management, discovery, application tracking, private document storage, and CV generation flows are already implemented.
+> **Status:** actively developed. Core job management, discovery, application tracking, private document storage, CV generation, and cover-letter generation flows are already implemented.
 
 ## What it does
 
@@ -19,6 +19,7 @@ The goal is to turn that workflow into one centralized and extensible system.
 * **Private Knowledge Base** — store resumes, candidate information, and supporting documents securely.
 * **AI-assisted CV generation** — generate tailored CV versions for a specific vacancy using verified candidate data instead of unrestricted AI-generated facts.
 * **CV history** — keep immutable generated CV versions for each job.
+* **Vacancy-based cover letters** — create, preview, download, and retain versioned PDF cover letters grounded in the verified Candidate Profile.
 * **Dashboard** — track applications, interviews, rejections, offers, and historical activity.
 
 ## Why I built it
@@ -42,7 +43,7 @@ flowchart LR
     Next --> Auth["Authentication & Server Actions"]
     Next --> DAL["Server-only Data Access Layer"]
     Next --> Sources["Job Source Adapters"]
-    Next --> CV["CV Generation"]
+    Next --> CV["Tailored Document Generation"]
 
     DAL --> DB["Supabase PostgreSQL + RLS"]
     DAL --> Storage["Private Supabase Storage"]
@@ -52,7 +53,7 @@ flowchart LR
     Sources --> DOU["DOU RSS"]
     Sources --> WWR["We Work Remotely RSS"]
 
-    CV --> Gemini["Gemini analysis + ResumeContent"]
+    CV --> Gemini["Gemini structured CV + cover-letter content"]
     CV --> Template["Validated user HTML template"]
     Template --> PDF["Chromium A4 PDF renderer"]
     PDF --> Storage
@@ -96,7 +97,7 @@ Job Search stores potentially sensitive information such as resumes and applicat
 
 Authenticated resources are scoped to a verified user on the server and additionally protected by PostgreSQL Row Level Security.
 
-Private documents and generated CVs are stored in non-public Supabase Storage buckets and are accessed through short-lived signed URLs.
+Private documents, generated CVs, and generated cover letters are stored in non-public Supabase Storage buckets and are accessed only through authenticated server routes or short-lived signed URLs.
 
 The browser never directly queries private database tables or imports server-side Supabase repositories.
 
@@ -124,7 +125,7 @@ The browser never directly queries private database tables or imports server-sid
 | `/dashboard`      | Job-search metrics and activity               |
 | `/jobs`           | Searchable job database                       |
 | `/jobs/discover`  | External job discovery                        |
-| `/jobs/[id]`      | Job details, status history and generated CVs |
+| `/jobs/[id]`      | Job details, status history and tailored documents |
 | `/board`          | Status-based application workflow             |
 | `/filters`        | Search preferences                            |
 | `/knowledge-base` | Private candidate documents                   |

@@ -2,6 +2,8 @@ import "server-only";
 
 import { createDefaultFilterSettings } from "@/features/filters/domain";
 import type { FilterSettings } from "@/features/filters/types";
+import { generatedCoverLetterFilename, nextCoverLetterVersion } from "@/features/cover-letters/domain";
+import type { GeneratedCoverLetter } from "@/features/cover-letters/types";
 import { generatedCvFilename, nextCvVersion } from "@/features/cvs/domain";
 import type { GeneratedCv, JobResumeRequirements, ResumeConfirmation, ResumeGeneration, SavedJobRequirement, VacancyAnalysis } from "@/features/cvs/types";
 import { jobDuplicateKey, matchesJobQuery } from "@/features/jobs/domain";
@@ -30,6 +32,12 @@ type StoredGeneratedCv = GeneratedCv & {
   deletedAt: string | null;
 };
 
+type StoredGeneratedCoverLetter = GeneratedCoverLetter & {
+  userId: string;
+  bytes: Uint8Array;
+  deletedAt: string | null;
+};
+
 type StoredTemplate = ResumeTemplate & { userId: string; mimeType: string; bytes: Uint8Array };
 type StoredGeneration = ResumeGeneration & { userId: string };
 type StoredJobResumeRequirements = JobResumeRequirements & { userId: string; jobId: string };
@@ -40,6 +48,7 @@ type MemoryState = {
   filters: Map<string, FilterSettings>;
   files: StoredKnowledgeFile[];
   generatedCvs: StoredGeneratedCv[];
+  generatedCoverLetters: StoredGeneratedCoverLetter[];
   templates: StoredTemplate[];
   generations: StoredGeneration[];
   confirmations: Array<ResumeConfirmation & { userId: string }>;
@@ -52,7 +61,7 @@ declare global {
 }
 
 function initialState(): MemoryState {
-  return { jobs: [], history: [], filters: new Map(), files: [], generatedCvs: [], templates: [], generations: [], confirmations: [], jobRequirements: [], ignoredExternalJobs: [] };
+  return { jobs: [], history: [], filters: new Map(), files: [], generatedCvs: [], generatedCoverLetters: [], templates: [], generations: [], confirmations: [], jobRequirements: [], ignoredExternalJobs: [] };
 }
 
 function state(): MemoryState {
@@ -124,6 +133,10 @@ function publicGeneratedCv(record: StoredGeneratedCv): GeneratedCv {
     assessment: structuredClone(record.assessment),
     createdAt: record.createdAt,
   };
+}
+
+function publicGeneratedCoverLetter(record: StoredGeneratedCoverLetter): GeneratedCoverLetter {
+  return { id: record.id, jobId: record.jobId, version: record.version, content: structuredClone(record.content), aiProvider: record.aiProvider, aiModel: record.aiModel, requestId: record.requestId, createdAt: record.createdAt };
 }
 
 function publicTemplate(record: StoredTemplate): ResumeTemplate {
@@ -330,6 +343,7 @@ export class MemoryAppStore implements AppStore {
     state().jobs.splice(index, 1);
     state().history = state().history.filter((event) => event.jobId !== id);
     state().generatedCvs = state().generatedCvs.filter((cv) => cv.jobId !== id);
+    state().generatedCoverLetters = state().generatedCoverLetters.filter((letter) => letter.jobId !== id);
   }
 
   async listStatusHistory(userId: string, jobId?: string): Promise<JobStatusHistory[]> {
@@ -600,6 +614,48 @@ export class MemoryAppStore implements AppStore {
     if (!cv) throw new ResourceNotFoundError("CV");
     cv.deletedAt = new Date().toISOString();
     cv.bytes = new Uint8Array();
+  }
+
+  async listGeneratedCoverLetters(userId: string, jobId: string): Promise<GeneratedCoverLetter[]> {
+    return state().generatedCoverLetters
+      .filter((letter) => letter.userId === userId && letter.jobId === jobId && letter.deletedAt === null)
+      .sort((left, right) => right.version - left.version)
+      .map(publicGeneratedCoverLetter);
+  }
+
+  async getGeneratedCoverLetterByRequestId(userId: string, jobId: string, requestId: string): Promise<GeneratedCoverLetter | null> {
+    const letter = state().generatedCoverLetters.find((candidate) => candidate.userId === userId && candidate.jobId === jobId && candidate.requestId === requestId && candidate.deletedAt === null);
+    return letter ? publicGeneratedCoverLetter(letter) : null;
+  }
+
+  async createGeneratedCoverLetter(userId: string, jobId: string, input: Parameters<AppStore["createGeneratedCoverLetter"]>[2]): Promise<GeneratedCoverLetter> {
+    if (!state().jobs.some((job) => job.userId === userId && job.id === jobId)) throw new ResourceNotFoundError("Job");
+    const committed = state().generatedCoverLetters.find((letter) => letter.userId === userId && letter.jobId === jobId && letter.requestId === input.requestId);
+    if (committed) return publicGeneratedCoverLetter(committed);
+    const stored: StoredGeneratedCoverLetter = {
+      id: crypto.randomUUID(), userId, jobId,
+      version: nextCoverLetterVersion(state().generatedCoverLetters.filter((letter) => letter.jobId === jobId).map((letter) => letter.version)),
+      content: structuredClone(input.content), aiProvider: input.aiProvider, aiModel: input.aiModel, requestId: input.requestId,
+      createdAt: new Date().toISOString(), bytes: input.bytes, deletedAt: null,
+    };
+    state().generatedCoverLetters.push(stored);
+    return publicGeneratedCoverLetter(stored);
+  }
+
+  async downloadGeneratedCoverLetter(userId: string, jobId: string, id: string) {
+    const letter = state().generatedCoverLetters.find((candidate) => candidate.userId === userId && candidate.jobId === jobId && candidate.id === id && candidate.deletedAt === null);
+    if (!letter) throw new ResourceNotFoundError("Cover letter");
+    const job = state().jobs.find((candidate) => candidate.userId === userId && candidate.id === jobId);
+    if (!job) throw new ResourceNotFoundError("Job");
+    const profile = await this.getCandidateProfile(userId);
+    return { kind: "content" as const, bytes: letter.bytes, mimeType: "application/pdf", filename: generatedCoverLetterFilename(profile?.personal.name ?? "Candidate", job.company) };
+  }
+
+  async deleteGeneratedCoverLetter(userId: string, jobId: string, id: string): Promise<void> {
+    const letter = state().generatedCoverLetters.find((candidate) => candidate.userId === userId && candidate.jobId === jobId && candidate.id === id && candidate.deletedAt === null);
+    if (!letter) throw new ResourceNotFoundError("Cover letter");
+    letter.deletedAt = new Date().toISOString();
+    letter.bytes = new Uint8Array();
   }
 
   async resetForTests(): Promise<void> {
