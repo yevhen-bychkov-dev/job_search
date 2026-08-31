@@ -1,9 +1,9 @@
 import "server-only";
 
 import serverlessChromium from "@sparticuz/chromium";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type Page } from "playwright-core";
 
-export type PdfRenderErrorCode = "PDF_BROWSER_LAUNCH_FAILED" | "PDF_HTML_LOAD_FAILED" | "PDF_CREATION_FAILED" | "PDF_OUTPUT_INVALID";
+export type PdfRenderErrorCode = "PDF_BROWSER_LAUNCH_FAILED" | "PDF_PAGE_CREATE_FAILED" | "PDF_HTML_LOAD_FAILED" | "PDF_CREATION_FAILED" | "PDF_OUTPUT_INVALID";
 
 export class PdfRenderError extends Error {
   readonly code: PdfRenderErrorCode;
@@ -33,7 +33,12 @@ export async function renderHtmlToPdf(html: string): Promise<Uint8Array> {
     throw new PdfRenderError("PDF_BROWSER_LAUNCH_FAILED", "The PDF browser could not start.", { cause: error });
   }
   try {
-    const page = await browser.newPage({ viewport: { width: 794, height: 1123 } });
+    let page: Page;
+    try {
+      page = await browser.newPage({ viewport: { width: 794, height: 1123 } });
+    } catch (error) {
+      throw new PdfRenderError("PDF_PAGE_CREATE_FAILED", "Chromium could not create a page for PDF rendering.", { cause: error });
+    }
     await page.route("**/*", async (route) => {
       const url = route.request().url();
       if (url === "about:blank" || url.startsWith("data:")) await route.continue();
