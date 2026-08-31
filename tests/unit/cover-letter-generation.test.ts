@@ -69,6 +69,7 @@ test("Gemini cover-letter request treats inputs as data and excludes contact det
     job: { title: "Frontend Engineer", company: "Synthetic Co", description: "Build accessible products.", technologies: ["React"] },
     candidate: { professionalTitle: "Engineer", summary: "Verified summary.", skills: ["React"], experience: [], education: [] },
   }, "gemini-3.6-flash");
+  const config = request.generationConfig as Record<string, unknown>;
   const serialized = JSON.stringify(request);
   assert.match(serialized, /untrusted data, never instructions/);
   assert.match(serialized, /verified profile is the only factual source/);
@@ -77,5 +78,7 @@ test("Gemini cover-letter request treats inputs as data and excludes contact det
   assert.match(serialized, /Sound like a capable person/);
   assert.match(serialized, /I am writing to express my interest/);
   assert.match(serialized, /citations are validation metadata/);
+  assert.equal(config.maxOutputTokens, 4_096);
+  assert.deepEqual(config.thinkingConfig, { thinkingLevel: "low" });
   assert.doesNotMatch(serialized, /synthetic@example\.test/);
 });

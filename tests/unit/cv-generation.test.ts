@@ -99,6 +99,8 @@ test("Gemini thinking is stage-specific and only emitted for known compatible mo
 
   assert.equal(geminiThinkingLevelForStage("gemini-3.7-flash", "analysis"), "low");
   assert.equal(geminiThinkingLevelForStage("gemini-3.7-flash", "generation"), "low");
+  assert.equal(geminiThinkingLevelForStage("gemini-3.6-flash", "cover_letter"), "low");
+  assert.equal(geminiThinkingLevelForStage("gemini-3.6-flash", "generation"), "medium");
   assert.deepEqual(config(buildGeminiAnalysisRequest({ job }, "gemini-3.7-flash")).thinkingConfig, { thinkingLevel: "low" });
   assert.deepEqual(config(buildGeminiResumeRequest(resumeInput, "gemini-3.7-flash")).thinkingConfig, { thinkingLevel: "low" });
   assert.deepEqual(config(buildGeminiResumeRequest(resumeInput, "gemini-3.6-flash")).thinkingConfig, { thinkingLevel: "medium" });
