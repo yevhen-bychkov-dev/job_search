@@ -130,7 +130,7 @@ test("template validation blocks executable content and supports supplied-templa
   assert.match(html, /State, data and integrations/);
   assert.match(html, /Testing and quality/);
   assert.match(html, /Backend foundation/);
-  assert.match(html, /Additional relevant skills/);
+  assert.match(html, /Additional skills/);
   assert.match(html, /<li>Familiar: GraphQL<\/li>/);
   assert.match(html, /class="resume-skill-columns"/);
   assert.match(html, /class="skill-group resume-skill-group"/);

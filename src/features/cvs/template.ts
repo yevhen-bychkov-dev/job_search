@@ -160,7 +160,7 @@ function skillGroupsHtml(skills: string[]): string {
   if (skills.length === 0) return "";
   const grouped = new Map<string, string[]>();
   for (const skill of skills) {
-    const title = RESUME_SKILL_CATEGORY_BY_KEY.get(resumeSkillKey(skill)) ?? "Additional relevant skills";
+    const title = RESUME_SKILL_CATEGORY_BY_KEY.get(resumeSkillKey(skill)) ?? "Additional skills";
     const categorySkills = grouped.get(title) ?? [];
     categorySkills.push(skill);
     grouped.set(title, categorySkills);
@@ -170,8 +170,8 @@ function skillGroupsHtml(skills: string[]): string {
       const categorySkills = grouped.get(category.title);
       return categorySkills ? [{ title: category.title, skills: categorySkills }] : [];
     }),
-    ...(grouped.has("Additional relevant skills")
-      ? [{ title: "Additional relevant skills", skills: grouped.get("Additional relevant skills") ?? [] }]
+    ...(grouped.has("Additional skills")
+      ? [{ title: "Additional skills", skills: grouped.get("Additional skills") ?? [] }]
       : []),
   ];
   const columnCount = orderedGroups.length > 1 ? 2 : 1;
