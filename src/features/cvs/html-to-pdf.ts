@@ -3,6 +3,8 @@ import "server-only";
 import serverlessChromium from "@sparticuz/chromium";
 import { chromium, type Browser, type Page } from "playwright-core";
 
+import { withSingleRetry } from "./render-retry";
+
 export type PdfRenderErrorCode = "PDF_BROWSER_LAUNCH_FAILED" | "PDF_PAGE_CREATE_FAILED" | "PDF_HTML_LOAD_FAILED" | "PDF_CREATION_FAILED" | "PDF_OUTPUT_INVALID";
 
 export class PdfRenderError extends Error {
@@ -15,7 +17,7 @@ export class PdfRenderError extends Error {
   }
 }
 
-export async function renderHtmlToPdf(html: string): Promise<Uint8Array> {
+async function renderHtmlToPdfOnce(html: string): Promise<Uint8Array> {
   const explicitPath = process.env.CHROMIUM_PATH?.trim();
   const useServerlessChromium = process.env.VERCEL === "1" && !explicitPath;
   let browser: Browser;
@@ -69,4 +71,11 @@ export async function renderHtmlToPdf(html: string): Promise<Uint8Array> {
   } finally {
     await browser.close().catch(() => undefined);
   }
+}
+
+export async function renderHtmlToPdf(html: string): Promise<Uint8Array> {
+  return withSingleRetry(
+    () => renderHtmlToPdfOnce(html),
+    (error) => error instanceof PdfRenderError,
+  );
 }

@@ -344,7 +344,7 @@ test("knowledge-base upload, open, metadata, and delete", async ({ page }) => {
   await page.getByRole("button", { name: "Upload file" }).click();
   await expect(page.getByText("File uploaded.")).toBeVisible();
   await expect(page.getByText("synthetic-resume.txt")).toBeVisible();
-  const openLink = page.getByRole("link", { name: "Open" });
+  const openLink = page.getByRole("link", { name: "Open", exact: true });
   await expect(openLink).toHaveAttribute("href", /\/knowledge-base\/files\/[0-9a-f-]{36}/);
 
   page.once("dialog", (dialog) => dialog.accept());
